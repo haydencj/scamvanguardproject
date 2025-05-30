@@ -137,7 +137,7 @@ def lambda_handler(event, context):
 
 This is an automated analysis. When in doubt, don't click links or share personal information.
 
-💙 Support ScamVanguard: scamvanguard.com/donate"""
+💙 Created by: haydenjohnson.co"""
             
             # Send email response
             ses.send_email(
