@@ -171,6 +171,16 @@ resource "aws_iam_role_policy" "lambda_policy" {
             "ses:FromAddress" = "noreply@${var.domain_name}"
           }
         }
+      },
+      {
+        Sid    = "SQSAccess"
+        Effect = "Allow"
+        Action = [
+          "sqs:ReceiveMessage",
+          "sqs:DeleteMessage",
+          "sqs:GetQueueAttributes"
+        ]
+        Resource = aws_sqs_queue.processing_queue.arn
       }
       # ... other statements
     ]
