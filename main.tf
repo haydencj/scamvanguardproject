@@ -40,13 +40,13 @@ resource "aws_s3_bucket" "email_attachments" {
   bucket = "scamvanguard-email-attachments-${random_id.bucket_suffix.hex}"
 }
 
-# Bucket version control
-resource "aws_s3_bucket_versioning" "email_attachments" {
-  bucket = aws_s3_bucket.email_attachments.id
-  versioning_configuration {
-    status = "Enabled"
-  }
-}
+# # Bucket version control
+# resource "aws_s3_bucket_versioning" "email_attachments" {
+#   bucket = aws_s3_bucket.email_attachments.id
+#   versioning_configuration {
+#     status = "Enabled"
+#   }
+# }
 
 # Bucket encryption 
 resource "aws_s3_bucket_server_side_encryption_configuration" "email_attachments" {
@@ -176,12 +176,26 @@ resource "aws_iam_role_policy" "lambda_policy" {
         Sid    = "SQSAccess"
         Effect = "Allow"
         Action = [
+          "sqs:SendMessage",
           "sqs:ReceiveMessage",
           "sqs:DeleteMessage",
           "sqs:GetQueueAttributes"
         ]
         Resource = aws_sqs_queue.processing_queue.arn
-      }
+      },
+      {
+        Sid      = "S3ReadEmail"
+        Effect   = "Allow"
+        Action   = ["s3:GetObject"]
+        Resource = "${aws_s3_bucket.email_attachments.arn}/*"
+      },
+      # Classifier can fetch secret
+      {
+        Sid      = "SecretsManagerRead",
+        Effect   = "Allow",
+        Action   = ["secretsmanager:GetSecretValue"],
+        Resource = aws_secretsmanager_secret.openai_api_key.arn
+      },
       # ... other statements
     ]
   })
@@ -311,6 +325,12 @@ resource "aws_ses_receipt_rule" "scan_email" {
   scan_enabled  = true # Enable spam/virus scanning
 
   recipients = ["scan@${var.domain_name}"]
+
+  depends_on = [
+    aws_s3_bucket.email_attachments,
+    aws_lambda_function.email_parser,
+    aws_ses_receipt_rule_set.main
+  ]
 
   # Store email in S3
   s3_action {
