@@ -1,8 +1,10 @@
-import json, os, logging, boto3, requests
+import os, json, logging, boto3, requests
 
 log = logging.getLogger(); log.setLevel(logging.INFO)
+
 ses = boto3.client("sesv2")
-OPENAI_KEY = os.environ["OPENAI_SECRET_NAME"]
+secrets = boto3.client("secretsmanager")
+OPENAI_KEY = secrets.get_secret_value(SecretId=os.environ["OPENAI_SECRET_NAME"])["SecretString"]
 
 def classify(text):
     r = requests.post(
@@ -13,7 +15,7 @@ def classify(text):
           "response_format": {"type":"json_object"},
           "messages":[
             {"role":"system",
-             "content":"Return JSON {\"label\":\"SAFE|SCAM\",\"reason\":\"...\"} (≤120 chars)."},
+             "content":"Return JSON {\"label\":\"SAFE|SCAM\",\"reason\":\"…\"} (<=120 chars)."},
             {"role":"user","content":text[:4000]}
           ]
         }, timeout=20).json()
@@ -23,15 +25,15 @@ def lambda_handler(event, _):
     for rec in event["Records"]:
         msg = json.loads(rec["body"])
         result = classify(msg["text"])
-        log.info("GPT result %s", result)
+        log.info("GPT result: %s", result)
 
         ses.send_email(
             FromEmailAddress=f"noreply@{os.environ['DOMAIN_NAME']}",
             Destination={"ToAddresses":[msg["sender"]]},
             Content={
-              "Simple":{
+              "Simple": {
                 "Subject":{"Data":f"[ScamVanguard] {result['label']}"},
-                "Body":{"Text":{"Data":f"{result['reason']}\n\n💙 scamvanguard.com/donate"}}
+                "Body":{"Text":{"Data":f\"\"\"{result['reason']}\n\n💙 scamvanguard.com/donate\"\"\"}}
               }
             }
         )
