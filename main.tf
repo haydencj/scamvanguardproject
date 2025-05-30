@@ -233,7 +233,7 @@ resource "aws_lambda_function" "email_parser" {
   filename         = "lambda_functions/email_parser.zip"
   function_name    = "ScamVanguardEmailParser"
   role             = aws_iam_role.lambda_execution.arn
-  handler          = "lambda_function.lambda_handler"
+  handler          = "email_parser.lambda_handler"
   source_code_hash = filebase64sha256("lambda_functions/email_parser.zip")
   runtime          = "python3.9"
   timeout          = 60
@@ -256,7 +256,7 @@ resource "aws_lambda_function" "classifier" {
   filename         = "lambda_functions/classifier.zip"
   function_name    = "ScamVanguardClassifier"
   role             = aws_iam_role.lambda_execution.arn
-  handler          = "lambda_function.lambda_handler"
+  handler          = "classifier.lambda_handler"
   source_code_hash = filebase64sha256("lambda_functions/classifier.zip")
   runtime          = "python3.9"
   timeout          = 300 # 5 minutes
