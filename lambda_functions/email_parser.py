@@ -1,38 +1,27 @@
-import boto3
-import json
-import os
-import logging
+import boto3, os, json, email, logging
 
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
+log = logging.getLogger()
+log.setLevel(logging.INFO)
 
-s3 = boto3.client('s3')
-sqs = boto3.client('sqs')
+s3  = boto3.client("s3")
+sqs = boto3.client("sqs")
 
-def lambda_handler(event, context):
-    logger.info("Received event: %s", json.dumps(event))
+BUCKET     = os.environ["ATTACHMENT_BUCKET"]          # from Terraform
+QUEUE_URL  = os.environ["PROCESSING_QUEUE_URL"]
 
-    # Get bucket and key from SES notification
-    record = event['Records'][0]
-    bucket = record['s3']['bucket']['name']
-    key = record['s3']['object']['key']
+def lambda_handler(event, _):
+    ses = event["Records"][0]["ses"]
+    key = f"emails/{ses['mail']['messageId']}"        # matches rule prefix
+    raw = s3.get_object(Bucket=BUCKET, Key=key)["Body"].read()
 
-    logger.info(f"Email stored at: s3://{bucket}/{key}")
+    msg  = email.message_from_bytes(raw)
+    body = msg.get_body(preferencelist=("plain","html"))
+    text = body.get_content() if body else ""
 
-    # Optionally fetch the email file
-    response = s3.get_object(Bucket=bucket, Key=key)
-    raw_email = response['Body'].read().decode('utf-8', errors='ignore')
-
-    logger.info("Email content (first 500 chars):\n%s", raw_email[:500])
-
-    # Send message to SQS
-    queue_url = os.environ['PROCESSING_QUEUE_URL']
-    sqs.send_message(
-        QueueUrl=queue_url,
-        MessageBody=json.dumps({
-            's3_bucket': bucket,
-            's3_key': key
-        })
-    )
-
+    job = {
+        "sender": ses["mail"]["source"],
+        "subject": ses["mail"]["commonHeaders"].get("subject",""),
+        "text": text[:250_000]                       # keep under SQS 256 KB
+    }
+    sqs.send_message(QueueUrl=QUEUE_URL, MessageBody=json.dumps(job))
     return {"statusCode": 200}

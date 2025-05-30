@@ -1,30 +1,38 @@
-import boto3
-import os
-import json
-import logging
+import json, os, logging, boto3, requests
 
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
+log = logging.getLogger(); log.setLevel(logging.INFO)
+ses = boto3.client("sesv2")
+OPENAI_KEY = os.environ["OPENAI_SECRET_NAME"]
 
-s3 = boto3.client('s3')
+def classify(text):
+    r = requests.post(
+        "https://api.openai.com/v1/chat/completions",
+        headers={"Authorization": f"Bearer {OPENAI_KEY}"},
+        json={
+          "model": "gpt-4o-mini",
+          "response_format": {"type":"json_object"},
+          "messages":[
+            {"role":"system",
+             "content":"Return JSON {\"label\":\"SAFE|SCAM\",\"reason\":\"...\"} (≤120 chars)."},
+            {"role":"user","content":text[:4000]}
+          ]
+        }, timeout=20).json()
+    return json.loads(r["choices"][0]["message"]["content"])
 
-def lambda_handler(event, context):
-    for record in event['Records']:
-        logger.info("Received SQS message: %s", record['body'])
+def lambda_handler(event, _):
+    for rec in event["Records"]:
+        msg = json.loads(rec["body"])
+        result = classify(msg["text"])
+        log.info("GPT result %s", result)
 
-        data = json.loads(record['body'])
-        bucket = data['s3_bucket']
-        key = data['s3_key']
-
-        # Fetch email contents from S3
-        response = s3.get_object(Bucket=bucket, Key=key)
-        email_data = response['Body'].read().decode('utf-8', errors='ignore')
-
-        # Simulate classification
-        logger.info("Classifying email from: s3://%s/%s", bucket, key)
-        logger.info("Email (first 500 chars):\n%s", email_data[:500])
-
-        # TODO: Use OpenAI API to classify email and send a reply
-        logger.info("Result: SCAM (simulated)")
-
+        ses.send_email(
+            FromEmailAddress=f"noreply@{os.environ['DOMAIN_NAME']}",
+            Destination={"ToAddresses":[msg["sender"]]},
+            Content={
+              "Simple":{
+                "Subject":{"Data":f"[ScamVanguard] {result['label']}"},
+                "Body":{"Text":{"Data":f"{result['reason']}\n\n💙 scamvanguard.com/donate"}}
+              }
+            }
+        )
     return {"statusCode": 200}
