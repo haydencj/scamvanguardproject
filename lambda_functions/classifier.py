@@ -286,7 +286,7 @@ def generate_html_email(result):
             <p>💙 Created by: <a href="https://haydenjohnson.co" class="support-link">haydenjohnson.co</a></p>
             <p style="font-size: 12px; color: #888; margin-top: 15px;">
                 This service is provided free of charge. To support our mission of protecting people from scams, 
-                consider visiting <a href="https://scamvanguard.com/donate" class="support-link">scamvanguard.com/donate</a>
+                consider visiting <a href="https://scamvanguard.com/donate" class="support-link">scamvanguard.com</a>
             </p>
             <p style="font-size: 11px; color: #999; margin-top: 10px;">
                 ScamVanguard | Automated Scam Detection | To stop receiving these emails, simply stop forwarding messages to scan@scamvanguard.com
