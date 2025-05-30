@@ -67,6 +67,10 @@ resource "aws_s3_bucket_lifecycle_configuration" "email_attachments" {
     id     = "delete-old-attachments"
     status = "Enabled"
 
+    filter {
+      prefix = "" # Applies to all objects
+    }
+
     expiration {
       days = 1
     }
@@ -178,19 +182,19 @@ resource "aws_iam_role_policy" "lambda_policy" {
 # Dead Letter Queue - catches messages that fail processing
 resource "aws_sqs_queue" "dlq" {
   name                      = "ScamVanguardDLQ"
-  message_retention_seconds = 1209600  # 14 days
-  kms_master_key_id        = "alias/aws/sqs"
+  message_retention_seconds = 1209600 # 14 days
+  kms_master_key_id         = "alias/aws/sqs"
 }
 
 # Main processing queue
 resource "aws_sqs_queue" "processing_queue" {
   name                       = "ScamVanguardProcessingQueue"
-  message_retention_seconds  = 86400   # 24 hours
-  visibility_timeout_seconds = 900     # 15 minutes
-  receive_wait_time_seconds  = 20      # Long polling
-  delay_seconds             = 0
-  max_message_size          = 262144   # 256 KB
-  kms_master_key_id         = "alias/aws/sqs"
+  message_retention_seconds  = 86400 # 24 hours
+  visibility_timeout_seconds = 900   # 15 minutes
+  receive_wait_time_seconds  = 20    # Long polling
+  delay_seconds              = 0
+  max_message_size           = 262144 # 256 KB
+  kms_master_key_id          = "alias/aws/sqs"
 
   redrive_policy = jsonencode({
     deadLetterTargetArn = aws_sqs_queue.dlq.arn
@@ -204,12 +208,12 @@ resource "aws_sqs_queue" "processing_queue" {
 resource "aws_lambda_function" "email_parser" {
   filename         = "lambda_functions/email_parser.zip"
   function_name    = "ScamVanguardEmailParser"
-  role            = aws_iam_role.lambda_execution.arn
-  handler         = "lambda_function.lambda_handler"
+  role             = aws_iam_role.lambda_execution.arn
+  handler          = "lambda_function.lambda_handler"
   source_code_hash = filebase64sha256("lambda_functions/email_parser.zip")
-  runtime         = "python3.9"
-  timeout         = 60
-  memory_size     = 512
+  runtime          = "python3.9"
+  timeout          = 60
+  memory_size      = 512
 
   environment {
     variables = {
@@ -227,18 +231,18 @@ resource "aws_lambda_function" "email_parser" {
 resource "aws_lambda_function" "classifier" {
   filename         = "lambda_functions/classifier.zip"
   function_name    = "ScamVanguardClassifier"
-  role            = aws_iam_role.lambda_execution.arn
-  handler         = "lambda_function.lambda_handler"
+  role             = aws_iam_role.lambda_execution.arn
+  handler          = "lambda_function.lambda_handler"
   source_code_hash = filebase64sha256("lambda_functions/classifier.zip")
-  runtime         = "python3.9"
-  timeout         = 300  # 5 minutes
-  memory_size     = 1024
+  runtime          = "python3.9"
+  timeout          = 300 # 5 minutes
+  memory_size      = 1024
 
   environment {
     variables = {
-      ATTACHMENT_BUCKET   = aws_s3_bucket.email_attachments.id
-      OPENAI_SECRET_NAME  = aws_secretsmanager_secret.openai_api_key.name
-      MODEL_THRESHOLD     = var.model_threshold
+      ATTACHMENT_BUCKET  = aws_s3_bucket.email_attachments.id
+      OPENAI_SECRET_NAME = aws_secretsmanager_secret.openai_api_key.name
+      MODEL_THRESHOLD    = var.model_threshold
     }
   }
 }
@@ -255,7 +259,7 @@ resource "aws_lambda_event_source_mapping" "sqs_trigger" {
 # OpenAI API Key secret
 resource "aws_secretsmanager_secret" "openai_api_key" {
   name                    = "ScamVanguard/OpenAI/APIKey"
-  description            = "OpenAI API key for GPT-4 Vision"
+  description             = "OpenAI API key for GPT-4 Vision"
   recovery_window_in_days = 7
 }
 
@@ -300,9 +304,9 @@ resource "aws_ses_receipt_rule" "scan_email" {
 
   # Store email in S3
   s3_action {
-    bucket_name = aws_s3_bucket.email_attachments.id
+    bucket_name       = aws_s3_bucket.email_attachments.id
     object_key_prefix = "emails/"
-    position    = 1
+    position          = 1
   }
 
   # Trigger Lambda
@@ -315,10 +319,10 @@ resource "aws_ses_receipt_rule" "scan_email" {
 
 # Permission for SES to invoke Lambda
 resource "aws_lambda_permission" "allow_ses" {
-  statement_id  = "AllowExecutionFromSES"
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.email_parser.function_name
-  principal     = "ses.amazonaws.com"
+  statement_id   = "AllowExecutionFromSES"
+  action         = "lambda:InvokeFunction"
+  function_name  = aws_lambda_function.email_parser.function_name
+  principal      = "ses.amazonaws.com"
   source_account = data.aws_caller_identity.current.account_id
 }
 
@@ -337,9 +341,9 @@ resource "aws_cloudwatch_dashboard" "main" {
   dashboard_name = "ScamVanguard"
 
   dashboard_body = jsonencode({
-        widgets = [
+    widgets = [
       {
-        type   = "metric"
+        type = "metric"
         properties = {
           metrics = [
             ["ScamVanguard", "EmailsReceived", { stat = "Sum" }],
@@ -353,7 +357,7 @@ resource "aws_cloudwatch_dashboard" "main" {
         }
       },
       {
-        type   = "metric"
+        type = "metric"
         properties = {
           metrics = [
             ["ScamVanguard", "Classification_SAFE", { stat = "Sum" }],
@@ -377,17 +381,17 @@ data "aws_caller_identity" "current" {}
 # ==================== OUTPUTS ====================
 
 output "email_bucket_name" {
-  value = aws_s3_bucket.email_attachments.id
+  value       = aws_s3_bucket.email_attachments.id
   description = "Name of the S3 bucket for email attachments"
 }
 
 output "processing_queue_url" {
-  value = aws_sqs_queue.processing_queue.url
+  value       = aws_sqs_queue.processing_queue.url
   description = "URL of the SQS processing queue"
 }
 
 output "scan_email_address" {
-  value = "scan@${var.domain_name}"
+  value       = "scan@${var.domain_name}"
   description = "Email address users should forward suspicious emails to"
 }
 
@@ -397,12 +401,12 @@ output "ses_verification_token" {
 }
 
 output "ses_dkim_tokens" {
-  value = aws_ses_domain_dkim.main.dkim_tokens
+  value       = aws_ses_domain_dkim.main.dkim_tokens
   description = "DKIM tokens to add to DNS as CNAME records"
 }
 
 output "dns_records_instructions" {
-  value = <<-EOT
+  value       = <<-EOT
     
     ========== REQUIRED DNS RECORDS ==========
     
