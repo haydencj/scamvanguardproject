@@ -392,8 +392,8 @@ output "scan_email_address" {
 }
 
 output "ses_verification_token" {
-  value = aws_ses_domain_identity.main.verification_token
-  description = "Add this as a TXT record to verify domain: _amazonses.${var.domain_name}"
+  value       = aws_ses_domain_identity.main.verification_token
+  description = "Add this as a TXT record to verify your SES domain"
 }
 
 output "ses_dkim_tokens" {
