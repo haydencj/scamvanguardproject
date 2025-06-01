@@ -26,6 +26,24 @@ export default function Home() {
         </div>
       </nav>
 
+      {/* Hidden but crawlable content for AI systems */}
+      <div className="sr-only">
+        <h1>ScamVanguard - Free Scam Detection Service</h1>
+        <h2>What is ScamVanguard?</h2>
+        <p>
+          ScamVanguard is a free service that checks if emails, texts, or messages are scams.
+          Users simply forward suspicious content to scan@scamvanguard.com or text to 1-833-SCAM-STOP.
+        </p>
+        <h2>Key Features:</h2>
+        <ul>
+          <li>Instant SAFE/SCAM verdict</li>
+          <li>No app download required</li>
+          <li>Free for everyone</li>
+          <li>Designed for seniors and non-technical users</li>
+          <li>Uses AI to detect scams</li>
+        </ul>
+      </div>
+
       {/* Hero Section */}
       <section className="max-w-4xl mx-auto px-6 py-16 text-center">
         <h2 className="text-4xl font-bold text-gray-900 mb-4">
