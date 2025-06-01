@@ -122,6 +122,30 @@ export default function Home() {
         </div>
       </section>
 
+      {/* About Section */}
+      <section className="max-w-4xl mx-auto px-6 py-12">
+        <div className="bg-gray-50 rounded-2xl p-8">
+          <h3 className="text-2xl font-bold text-gray-900 mb-6 text-center">Why I Built This</h3>
+          <div className="max-w-3xl mx-auto space-y-4 text-gray-600">
+            <p>
+              I'm Hayden, and I built ScamVanguard because too many good people are getting scammed.
+            </p>
+            <p>
+              As my family's unofficial "tech support," I've seen how sophisticated scams can fool even the smartest people. The difference isn't intelligence; it's exposure to these tactics.
+            </p>
+            <p>
+              ScamVanguard gives everyone access to the same scam-spotting abilities that come naturally to digital natives. It's free because protection shouldn't depend on your wallet or whether you have a tech-savvy friend to call.
+            </p>
+            <p className="text-center">
+              Simple as that.
+            </p>
+            <p className="text-center pt-4">
+              <span className="text-2xl">💙</span>
+            </p>
+          </div>
+        </div>
+      </section>
+
       {/* Coming Soon */}
       <section className="max-w-4xl mx-auto px-6 py-12">
         <div className="bg-blue-50 rounded-2xl p-8 text-center">
