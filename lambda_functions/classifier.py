@@ -4,6 +4,8 @@ import logging
 import boto3
 import urllib.request
 import urllib.error
+import re
+from urllib.parse import urlparse
 from botocore.exceptions import ClientError
 
 # Set up logging
@@ -11,12 +13,146 @@ log = logging.getLogger()
 log.setLevel(logging.INFO)
 
 # Initialize AWS clients
-ses = boto3.client("ses")  # Using SES v1 for HTML support
+ses = boto3.client("ses")
 secrets = boto3.client("secretsmanager")
 sqs = boto3.client("sqs")
 
 # Cache for secrets to avoid repeated API calls
 _openai_key_cache = None
+
+# Public email domains that companies should NEVER use
+PUBLIC_EMAIL_DOMAINS = {
+    'gmail.com', 'outlook.com', 'hotmail.com', 'yahoo.com', 'icloud.com',
+    'aol.com', 'protonmail.com', 'gmx.com', 'mail.com', 'usa.com',
+    'yandex.com', 'mail.ru', 'qq.com', '163.com', '126.com', 'sina.com',
+    'yahoo.co.uk', 'yahoo.ca', 'yahoo.de', 'yahoo.fr', 'yahoo.es',
+    'outlook.de', 'outlook.fr', 'outlook.es', 'live.com', 'msn.com',
+    'me.com', 'mac.com', 'googlemail.com', 'pm.me', 'proton.me',
+    'tutanota.com', 'fastmail.com', 'hushmail.com', 'gmx.de', 'web.de'
+}
+
+# Known legitimate company domains (expandable)
+LEGITIMATE_COMPANY_DOMAINS = {
+    # Banks
+    'bankofamerica.com', 'chase.com', 'wellsfargo.com', 'citibank.com',
+    'usbank.com', 'pnc.com', 'capitalone.com', 'tdbank.com', 'keybank.com',
+    'regions.com', 'fifththird.com', 'huntington.com', 'suntrust.com',
+    # Major tech companies
+    'amazon.com', 'apple.com', 'microsoft.com', 'google.com', 'meta.com',
+    'netflix.com', 'adobe.com', 'salesforce.com', 'oracle.com', 'ibm.com',
+    # Payment services
+    'paypal.com', 'venmo.com', 'cashapp.com', 'zelle.com', 'stripe.com',
+    # E-commerce
+    'ebay.com', 'etsy.com', 'shopify.com', 'walmart.com', 'target.com',
+    'bestbuy.com', 'homedepot.com', 'lowes.com', 'costco.com',
+    # Services
+    'uber.com', 'lyft.com', 'doordash.com', 'grubhub.com', 'airbnb.com',
+    'spotify.com', 'dropbox.com', 'slack.com', 'zoom.us', 'linkedin.com',
+    'twitter.com', 'instagram.com', 'facebook.com', 'tiktok.com',
+    # Utilities & Telecom
+    'att.com', 'verizon.com', 'tmobile.com', 'comcast.com', 'spectrum.com',
+    # Airlines
+    'aa.com', 'delta.com', 'united.com', 'southwest.com', 'jetblue.com',
+    # Automotive
+    'grammarly.com', 'cars.com', 'carvana.com', 'carmax.com', 'email-carmax.com',
+    'autotrader.com', 'carvana.com', 'vroom.com', 'shift.com', 'accu-trade.com'
+    # Other services
+    'indeed.com', 'glassdoor.com', 'zillow.com', 'redfin.com', 'apartments.com'
+}
+
+# Common email marketing domain patterns used by legitimate companies
+LEGITIMATE_EMAIL_PATTERNS = [
+    r'email[.-].*\.com$',  # email-company.com, email.company.com
+    r'mail[.-].*\.com$',   # mail-company.com, mail.company.com
+    r'.*\.mailer\..*',     # company.mailer.com
+    r'.*\.mailgun\..*',    # via mailgun
+    r'.*\.sendgrid\..*',   # via sendgrid
+    r'.*\.amazonses\.com$', # Amazon SES
+    r'.*\.messagebus\.com$' # MessageBus
+]
+
+def extract_sender_domain(sender_email):
+    """Extract domain from email address."""
+    match = re.search(r'@([^\s>]+)', sender_email)
+    if match:
+        return match.group(1).lower().strip()
+    return None
+
+def is_public_email_domain(domain):
+    """Check if the domain is a public email provider."""
+    if not domain:
+        return False
+    return domain in PUBLIC_EMAIL_DOMAINS or any(domain.endswith('.' + public) for public in PUBLIC_EMAIL_DOMAINS)
+
+def check_domain_legitimacy(domain):
+    """Check if a domain appears to be from a legitimate company."""
+    if not domain:
+        return False
+    
+    # Direct match against known legitimate domains
+    for legit_domain in LEGITIMATE_COMPANY_DOMAINS:
+        if domain == legit_domain or domain.endswith('.' + legit_domain):
+            return True
+    
+    # Check if it's a subdomain of a legitimate company
+    # e.g., ealerts.bankofamerica.com, email-carmax.com
+    parts = domain.split('.')
+    if len(parts) >= 2:
+        # Check the last two parts (e.g., bankofamerica.com from ealerts.bankofamerica.com)
+        base_domain = '.'.join(parts[-2:])
+        if base_domain in LEGITIMATE_COMPANY_DOMAINS:
+            return True
+        
+        # Check the last three parts for domains like co.uk
+        if len(parts) >= 3:
+            base_domain_extended = '.'.join(parts[-3:])
+            if base_domain_extended in LEGITIMATE_COMPANY_DOMAINS:
+                return True
+    
+    # Check common email marketing patterns
+    for pattern in LEGITIMATE_EMAIL_PATTERNS:
+        if re.match(pattern, domain):
+            # Additional check: ensure the base company name is recognizable
+            for company in ['carmax', 'uber', 'amazon', 'apple', 'paypal', 'ebay', 
+                          'netflix', 'spotify', 'target', 'walmart', 'bestbuy',
+                          'bankofamerica', 'chase', 'wellsfargo', 'citibank']:
+                if company in domain.lower().replace('-', '').replace('_', ''):
+                    return True
+    
+    return False
+
+def extract_urls_from_text(text):
+    """Extract all URLs from the text."""
+    url_pattern = r'https?://[^\s<>"{}|\\^`\[\]]+'
+    urls = re.findall(url_pattern, text)
+    return urls
+
+def analyze_email_content(message):
+    """Analyze email content for suspicious patterns."""
+    text = message.get("text", "").lower()
+    subject = message.get("subject", "").lower()
+    
+    # Combine subject and text for analysis
+    full_content = f"{subject} {text}"
+    
+    # Check for legitimate indicators first
+    has_specific_account_info = bool(re.search(r'\b\d{4}\b|\$\d+\.\d{2}|account ending in', full_content))
+    has_person_name = bool(re.search(r'(hayden|dear [a-z]+ [a-z]+)', full_content))
+    
+    suspicious_indicators = {
+        'urgency': bool(re.search(r'\b(urgent|immediate|act now|expire|limited time|hurry|asap|deadline|final notice|last chance)\b', full_content)) and not has_specific_account_info,
+        'account_threats': bool(re.search(r'\b(suspend|suspended|lock|locked|close|closed|deactivate|terminate|restriction|limited access)\b', full_content)) and not has_specific_account_info,
+        'verify_account': bool(re.search(r'\b(verify your account|confirm your identity|update your information|validate your account|re-verify)\b', full_content)),
+        'money_request': bool(re.search(r'\b(wire transfer|western union|moneygram|bitcoin|cryptocurrency|payment required|send money|pay now)\b', full_content)),
+        'prizes': bool(re.search(r'\b(congratulations|won|winner|prize|lottery|sweepstakes|million dollars|inheritance|beneficiary)\b', full_content)),
+        'tax_refund': bool(re.search(r'\b(tax refund|irs refund|government refund|stimulus payment)\b', full_content)),
+        'click_link': bool(re.search(r'\b(click here|click this link|click below|click now)\b', full_content)) and not has_specific_account_info,
+        'personal_info_request': bool(re.search(r'\b(social security|ssn|password|pin|account number|routing number|credit card)\b', full_content)) and 'enter' in full_content,
+        'poor_grammar': len(re.findall(r'[.!?]{2,}|[A-Z]{5,}', text)) > 3,
+        'suspicious_attachment': bool(re.search(r'attachment.*(\.exe|\.scr|\.vbs|\.pif|\.cmd|\.bat|\.jar|\.zip|\.rar)', full_content))
+    }
+    
+    return suspicious_indicators
 
 def get_openai_key():
     """Get OpenAI API key from Secrets Manager with caching."""
@@ -28,22 +164,99 @@ def get_openai_key():
     try:
         secret_name = os.environ["OPENAI_SECRET_NAME"]
         response = secrets.get_secret_value(SecretId=secret_name)
-        
-        # Parse the secret value (it's stored as JSON)
         secret_data = json.loads(response["SecretString"])
         _openai_key_cache = secret_data["api_key"]
-        
         return _openai_key_cache
     except Exception as e:
         log.error(f"Failed to retrieve OpenAI API key: {str(e)}")
         raise
 
-def classify(text):
+def classify(message):
     """Classify text as SAFE, SCAM, or UNSURE using OpenAI GPT-4."""
     try:
+        # Extract sender information
+        sender = message.get("sender", "")
+        sender_domain = extract_sender_domain(sender)
+        is_public_domain = is_public_email_domain(sender_domain)
+        is_known_company = check_domain_legitimacy(sender_domain)
+        
+        # Extract URLs and analyze content
+        text = message.get("text", "")
+        urls = extract_urls_from_text(text)
+        suspicious_indicators = analyze_email_content(message)
+        
+        # Claims to be from a company but uses public email = INSTANT SCAM
+        company_claim_pattern = r'\b(bank|paypal|amazon|apple|microsoft|google|netflix|ebay|fedex|ups|irs|government|support team|customer service|security team|account team)\b'
+        claims_to_be_company = bool(re.search(company_claim_pattern, text.lower()))
+        
+        if is_public_domain and claims_to_be_company:
+            log.info(f"Instant scam detection: Public domain {sender_domain} claiming to be a company")
+            return {
+                "label": "SCAM",
+                "reason": "Fraudulent sender using public email",
+                "detailed_reason": f"This email claims to be from a legitimate company but is sent from {sender_domain}, a public email domain. Real companies NEVER use Gmail, Yahoo, Outlook, etc."
+            }
+        
+        # Prepare enhanced prompt for AI
         api_key = get_openai_key()
         
-        # Prepare the request
+        system_prompt = """You are an expert email security analyst specializing in scam detection. Analyze emails with these critical rules:
+
+FUNDAMENTAL RULE: Real companies NEVER send official communications from public email domains (@gmail.com, @yahoo.com, @outlook.com, @hotmail.com, etc.). Any email claiming to be from a bank, PayPal, Amazon, or any company but sent from a public email domain is 100% a SCAM.
+
+IMPORTANT: Many legitimate companies use specialized subdomains and email marketing domains:
+- Subdomains: ealerts.bankofamerica.com, alerts.chase.com, email.netflix.com
+- Marketing domains: email-carmax.com, mail.company.com
+- These are LEGITIMATE if they are subdomains of the actual company domain
+
+Classification Guidelines:
+
+SCAM indicators:
+- Sender uses public email domain (Gmail, Yahoo, etc.) while claiming to be a company
+- Domain that looks similar but isn't the real company (bankofamerica-alerts.com vs ealerts.bankofamerica.com)
+- Requests sensitive information (passwords, SSN, credit card details)
+- Contains urgent threats (account suspension, immediate action required) WITHOUT specific details
+- Promises unexpected money (lottery, inheritance, tax refund)
+- Has suspicious links to non-company domains
+- Poor grammar/spelling from supposed professional entity
+- Generic greetings without your name or account details
+
+SAFE indicators:
+- From legitimate company subdomain (e.g., ealerts.bankofamerica.com)
+- Contains specific account details (last 4 digits, specific amounts, dates)
+- Routine account notifications (low balance alerts, transaction confirmations)
+- Professional formatting matching company's usual style
+- Links go to the official company domain
+- No requests for you to provide sensitive information
+- Personalized with your name or partial account number
+
+UNSURE when:
+- Domain seems legitimate but content is suspicious
+- Cannot definitively determine if safe or scam
+
+Return JSON: {"label":"SAFE|SCAM|UNSURE","reason":"brief explanation under 120 chars","detailed_reason":"1-2 sentences explaining the specific factors"}"""
+
+        # Build context for the AI
+        suspicious_count = sum(suspicious_indicators.values())
+        suspicious_items = [k.replace('_', ' ') for k, v in suspicious_indicators.items() if v]
+        
+        email_context = f"""
+Email Analysis:
+- Sender email: {sender}
+- Sender domain: {sender_domain}
+- Is public email domain: {is_public_domain}
+- Claims to be from company: {claims_to_be_company}
+- Domain appears legitimate: {is_known_company}
+- Number of URLs in email: {len(urls)}
+- Suspicious indicators found: {suspicious_count} ({', '.join(suspicious_items) if suspicious_items else 'none'})
+
+Email subject: {message.get('subject', 'No subject')}
+
+Email content:
+{text[:4000]}
+"""
+        
+        # Make API request
         url = "https://api.openai.com/v1/chat/completions"
         headers = {
             "Authorization": f"Bearer {api_key}",
@@ -54,65 +267,49 @@ def classify(text):
             "model": "gpt-4o-mini",
             "response_format": {"type": "json_object"},
             "messages": [
-                {
-                    "role": "system",
-                    "content": "You are a scam detection assistant. Analyze the text and return JSON: {\"label\":\"SAFE|SCAM|UNSURE\",\"reason\":\"brief explanation\",\"detailed_reason\":\"A more detailed explanation of why this was flagged (1-2 sentences)\"} (reason <= 120 chars)."
-                },
-                {
-                    "role": "user",
-                    "content": text[:4000]  # Limit text to 4000 chars
-                }
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": email_context}
             ],
-            "temperature": 0.3,  # Lower temperature for more consistent results
-            "max_tokens": 200
+            "temperature": 0.1,  # Very low for consistency
+            "max_tokens": 300
         }
         
-        # Make the request using urllib
         req = urllib.request.Request(
             url,
             data=json.dumps(data).encode('utf-8'),
             headers=headers
         )
         
-        # Set timeout
         with urllib.request.urlopen(req, timeout=20) as response:
             result = json.loads(response.read().decode('utf-8'))
         
-        # Extract the classification result
+        # Extract and validate classification
         content = result["choices"][0]["message"]["content"]
         classification = json.loads(content)
         
-        # Validate the response format
-        if "label" not in classification or "reason" not in classification:
-            raise ValueError("Invalid response format from GPT")
+        if "label" not in classification or classification["label"] not in ["SAFE", "SCAM", "UNSURE"]:
+            classification = {
+                "label": "UNSURE",
+                "reason": "Unable to determine classification",
+                "detailed_reason": "The analysis could not definitively determine if this is safe or a scam. Exercise caution."
+            }
         
-        # Ensure label is one of the expected values
-        if classification["label"] not in ["SAFE", "SCAM", "UNSURE"]:
-            classification["label"] = "UNSURE"
-            classification["reason"] = "Unable to determine classification"
-            classification["detailed_reason"] = "The analysis could not definitively determine if this is safe or a scam."
-        
+        log.info(f"AI Classification: {classification['label']} for {sender_domain}")
         return classification
         
     except urllib.error.URLError as e:
         log.error(f"OpenAI API error: {str(e)}")
-        if hasattr(e, 'code') and e.code == 401:
-            return {
-                "label": "UNSURE", 
-                "reason": "Authentication error - check API key",
-                "detailed_reason": "Service temporarily unavailable. Please exercise caution with suspicious messages."
-            }
         return {
-            "label": "UNSURE", 
-            "reason": "Service timeout - treat as potential scam",
-            "detailed_reason": "Analysis service timed out. When in doubt, don't click links or share personal information."
+            "label": "UNSURE",
+            "reason": "Analysis service temporarily unavailable",
+            "detailed_reason": "Could not complete analysis. When in doubt, don't click links or share personal information."
         }
     except Exception as e:
         log.error(f"Classification error: {str(e)}")
         return {
-            "label": "UNSURE", 
-            "reason": "Service unavailable - treat as potential scam",
-            "detailed_reason": "Analysis service is temporarily unavailable. Please exercise caution."
+            "label": "UNSURE",
+            "reason": "Service error - treat with caution",
+            "detailed_reason": "Analysis service encountered an error. Please exercise caution with this message."
         }
 
 def get_emoji(label):
@@ -334,11 +531,15 @@ def lambda_handler(event, context):
             # Parse the SQS message
             message = json.loads(record["body"])
             
-            sender_email = message.get('sender', 'unknown')
-            log.info(f"Processing message from {sender_email}")
+            # Get the user who forwarded the email (to send response back to them)
+            response_email = message.get('forwarding_user', message.get('sender', 'unknown'))
+            original_sender = message.get('sender', 'unknown')
             
-            # Classify the content
-            result = classify(message.get("text", ""))
+            log.info(f"Processing email originally from: {original_sender}")
+            log.info(f"Will send response to: {response_email}")
+            
+            # Classify the content with full message context
+            result = classify(message)
             
             log.info(f"Classification result: {result}")
             
@@ -354,7 +555,7 @@ def lambda_handler(event, context):
                 response = ses.send_email(
                     Source=f"ScamVanguard <noreply@{domain_name}>",
                     Destination={
-                        'ToAddresses': [sender_email]
+                        'ToAddresses': [response_email]
                     },
                     Message={
                         'Subject': {
@@ -374,7 +575,7 @@ def lambda_handler(event, context):
                     }
                 )
                 
-                log.info(f"Email sent to {sender_email}, MessageId: {response['MessageId']}")
+                log.info(f"Email sent to {response_email}, MessageId: {response['MessageId']}")
                 
             except ClientError as e:
                 error_code = e.response['Error']['Code']
@@ -382,7 +583,7 @@ def lambda_handler(event, context):
                 
                 if error_code == 'MessageRejected':
                     log.error(f"SES MessageRejected: {error_message}")
-                    log.error(f"Make sure {sender_email} is verified in SES (sandbox mode) or move SES out of sandbox mode")
+                    log.error(f"Make sure {response_email} is verified in SES (sandbox mode) or move SES out of sandbox mode")
                     # Don't re-raise for email sending errors in sandbox mode
                     # Just log and continue
                 else:
