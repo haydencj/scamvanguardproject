@@ -1,5 +1,5 @@
-// app/page.js
 import Link from 'next/link';
+import Footer from './components/Footer';
 
 export default function Home() {
   return (
@@ -8,20 +8,25 @@ export default function Home() {
       <nav className="border-b border-gray-200">
         <div className="max-w-4xl mx-auto px-6 py-4">
           <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-2">
+            <Link href="/" className="flex items-center space-x-2">
               <svg className="w-8 h-8 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
               </svg>
               <h1 className="text-xl font-semibold text-gray-900">ScamVanguard</h1>
+            </Link>
+            <div className="flex items-center space-x-6">
+              <Link href="/how-it-works" className="text-md font-medium text-gray-600 hover:text-gray-900 transition-colors">
+                How It Works
+              </Link>
+              <a
+                href="https://www.buymeacoffee.com/haydencj"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-md font-medium text-gray-600 hover:text-gray-900 transition-colors"
+              >
+                Donate
+              </a>
             </div>
-            <a
-              href="https://www.buymeacoffee.com/haydencj"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-md font-medium text-gray-600 hover:text-gray-900 transition-colors"
-            >
-              Donate
-            </a>
           </div>
         </div>
       </nav>
@@ -62,7 +67,7 @@ export default function Home() {
       </section>
 
       {/* How it Works */}
-      <section className="max-w-4xl mx-auto px-6 py-12">
+      <section className="max-w-4xl mx-auto px-6 py-6">
         <h3 className="text-2xl font-bold text-gray-900 mb-8 text-center">How It Works</h3>
         <div className="grid md:grid-cols-3 gap-8">
           <div className="text-center">
@@ -191,30 +196,7 @@ export default function Home() {
       </section>
 
       {/* Footer */}
-      <footer className="border-t border-gray-200 mt-16">
-        <div className="max-w-4xl mx-auto px-6 py-8">
-          <div className="flex flex-col md:flex-row items-center justify-between">
-            <div className="text-center md:text-left mb-4 md:mb-0">
-              <p className="text-gray-600 text-sm">
-                © 2025 ScamVanguard. A non-profit service by Hayden Johnson.
-              </p>
-            </div>
-            <div className="flex items-center space-x-6">
-              <a
-                href="https://www.buymeacoffee.com/haydencj"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-sm text-gray-600 hover:text-gray-900 transition-colors"
-              >
-                Support Us
-              </a>
-              <a href="mailto:scan@scamvanguard.com" className="text-sm text-gray-600 hover:text-gray-900 transition-colors">
-                Contact
-              </a>
-            </div>
-          </div>
-        </div>
-      </footer>
+      <Footer/>
     </div>
   );
 }

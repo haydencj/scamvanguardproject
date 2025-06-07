@@ -1,11 +1,14 @@
-// Robots.txt for search engines
 export async function GET() {
   const robots = `User-agent: *
 Allow: /
 
-# Block admin or private paths if you have any
-# Disallow: /admin/
-# Disallow: /api/
+# Priority pages for indexing
+Allow: /how-it-works
+Allow: /privacy
+Allow: /terms
+
+# Lower priority pages
+Allow: /unsubscribe
 
 # Crawl-delay for respectful crawling
 Crawl-delay: 1
