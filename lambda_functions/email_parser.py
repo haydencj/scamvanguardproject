@@ -1,599 +1,364 @@
+import boto3
 import os
 import json
+import email
 import logging
-import boto3
-import urllib.request
-import urllib.error
 import re
-from urllib.parse import urlparse
-from botocore.exceptions import ClientError
+from email import policy
+from email.parser import BytesParser
+from email.utils import parseaddr
+from datetime import datetime, timedelta
+from decimal import Decimal
 
 # Set up logging
 log = logging.getLogger()
 log.setLevel(logging.INFO)
 
 # Initialize AWS clients
-ses = boto3.client("ses")
-secrets = boto3.client("secretsmanager")
+s3 = boto3.client("s3")
 sqs = boto3.client("sqs")
+dynamodb = boto3.resource('dynamodb')
 
-# Cache for secrets to avoid repeated API calls
-_openai_key_cache = None
+# Environment variables
+BUCKET = os.environ["ATTACHMENT_BUCKET"]
+QUEUE_URL = os.environ["PROCESSING_QUEUE_URL"]
+SUPPRESSION_TABLE = os.environ.get("SUPPRESSION_TABLE", "ScamVanguardEmailSuppression")
 
-# Public email domains that companies should NEVER use
-PUBLIC_EMAIL_DOMAINS = {
-    'gmail.com', 'outlook.com', 'hotmail.com', 'yahoo.com', 'icloud.com',
-    'aol.com', 'protonmail.com', 'gmx.com', 'mail.com', 'usa.com',
-    'yandex.com', 'mail.ru', 'qq.com', '163.com', '126.com', 'sina.com',
-    'yahoo.co.uk', 'yahoo.ca', 'yahoo.de', 'yahoo.fr', 'yahoo.es',
-    'outlook.de', 'outlook.fr', 'outlook.es', 'live.com', 'msn.com',
-    'me.com', 'mac.com', 'googlemail.com', 'pm.me', 'proton.me',
-    'tutanota.com', 'fastmail.com', 'hushmail.com', 'gmx.de', 'web.de'
-}
+# Rate limiting configuration
+RATE_LIMIT_WINDOW_MINUTES = 60  # 1 hour window
+RATE_LIMIT_MAX_EMAILS = 10      # Max 10 emails per hour
+RATE_LIMIT_BLOCK_DAYS = 1        # Block for 1 day after rate limit exceeded
 
-# Known legitimate company domains (expandable)
-LEGITIMATE_COMPANY_DOMAINS = {
-    # Banks
-    'bankofamerica.com', 'chase.com', 'wellsfargo.com', 'citibank.com',
-    'usbank.com', 'pnc.com', 'capitalone.com', 'tdbank.com', 'keybank.com',
-    'regions.com', 'fifththird.com', 'huntington.com', 'suntrust.com',
-    # Major tech companies
-    'amazon.com', 'apple.com', 'microsoft.com', 'google.com', 'meta.com',
-    'netflix.com', 'adobe.com', 'salesforce.com', 'oracle.com', 'ibm.com',
-    # Payment services
-    'paypal.com', 'venmo.com', 'cashapp.com', 'zelle.com', 'stripe.com',
-    # E-commerce
-    'ebay.com', 'etsy.com', 'shopify.com', 'walmart.com', 'target.com',
-    'bestbuy.com', 'homedepot.com', 'lowes.com', 'costco.com',
-    # Services
-    'uber.com', 'lyft.com', 'doordash.com', 'grubhub.com', 'airbnb.com',
-    'spotify.com', 'dropbox.com', 'slack.com', 'zoom.us', 'linkedin.com',
-    'twitter.com', 'instagram.com', 'facebook.com', 'tiktok.com',
-    # Utilities & Telecom
-    'att.com', 'verizon.com', 'tmobile.com', 'comcast.com', 'spectrum.com',
-    # Airlines
-    'aa.com', 'delta.com', 'united.com', 'southwest.com', 'jetblue.com',
-    # Automotive
-    'grammarly.com', 'cars.com', 'carvana.com', 'carmax.com', 'email-carmax.com',
-    'autotrader.com', 'carvana.com', 'vroom.com', 'shift.com', 'accu-trade.com'
-    # Other services
-    'indeed.com', 'glassdoor.com', 'zillow.com', 'redfin.com', 'apartments.com'
-}
+# Get DynamoDB tables
+suppression_table = dynamodb.Table(SUPPRESSION_TABLE)
 
-# Common email marketing domain patterns used by legitimate companies
-LEGITIMATE_EMAIL_PATTERNS = [
-    r'email[.-].*\.com$',  # email-company.com, email.company.com
-    r'mail[.-].*\.com$',   # mail-company.com, mail.company.com
-    r'.*\.mailer\..*',     # company.mailer.com
-    r'.*\.mailgun\..*',    # via mailgun
-    r'.*\.sendgrid\..*',   # via sendgrid
-    r'.*\.amazonses\.com$', # Amazon SES
-    r'.*\.messagebus\.com$' # MessageBus
-]
-
-def extract_sender_domain(sender_email):
-    """Extract domain from email address."""
-    match = re.search(r'@([^\s>]+)', sender_email)
-    if match:
-        return match.group(1).lower().strip()
-    return None
-
-def is_public_email_domain(domain):
-    """Check if the domain is a public email provider."""
-    if not domain:
-        return False
-    return domain in PUBLIC_EMAIL_DOMAINS or any(domain.endswith('.' + public) for public in PUBLIC_EMAIL_DOMAINS)
-
-def check_domain_legitimacy(domain):
-    """Check if a domain appears to be from a legitimate company."""
-    if not domain:
-        return False
-    
-    # Direct match against known legitimate domains
-    for legit_domain in LEGITIMATE_COMPANY_DOMAINS:
-        if domain == legit_domain or domain.endswith('.' + legit_domain):
-            return True
-    
-    # Check if it's a subdomain of a legitimate company
-    # e.g., ealerts.bankofamerica.com, email-carmax.com
-    parts = domain.split('.')
-    if len(parts) >= 2:
-        # Check the last two parts (e.g., bankofamerica.com from ealerts.bankofamerica.com)
-        base_domain = '.'.join(parts[-2:])
-        if base_domain in LEGITIMATE_COMPANY_DOMAINS:
-            return True
-        
-        # Check the last three parts for domains like co.uk
-        if len(parts) >= 3:
-            base_domain_extended = '.'.join(parts[-3:])
-            if base_domain_extended in LEGITIMATE_COMPANY_DOMAINS:
-                return True
-    
-    # Check common email marketing patterns
-    for pattern in LEGITIMATE_EMAIL_PATTERNS:
-        if re.match(pattern, domain):
-            # Additional check: ensure the base company name is recognizable
-            for company in ['carmax', 'uber', 'amazon', 'apple', 'paypal', 'ebay', 
-                          'netflix', 'spotify', 'target', 'walmart', 'bestbuy',
-                          'bankofamerica', 'chase', 'wellsfargo', 'citibank']:
-                if company in domain.lower().replace('-', '').replace('_', ''):
-                    return True
-    
-    return False
-
-def extract_urls_from_text(text):
-    """Extract all URLs from the text."""
-    url_pattern = r'https?://[^\s<>"{}|\\^`\[\]]+'
-    urls = re.findall(url_pattern, text)
-    return urls
-
-def analyze_email_content(message):
-    """Analyze email content for suspicious patterns."""
-    text = message.get("text", "").lower()
-    subject = message.get("subject", "").lower()
-    
-    # Combine subject and text for analysis
-    full_content = f"{subject} {text}"
-    
-    # Check for legitimate indicators first
-    has_specific_account_info = bool(re.search(r'\b\d{4}\b|\$\d+\.\d{2}|account ending in', full_content))
-    has_person_name = bool(re.search(r'(hayden|dear [a-z]+ [a-z]+)', full_content))
-    
-    suspicious_indicators = {
-        'urgency': bool(re.search(r'\b(urgent|immediate|act now|expire|limited time|hurry|asap|deadline|final notice|last chance)\b', full_content)) and not has_specific_account_info,
-        'account_threats': bool(re.search(r'\b(suspend|suspended|lock|locked|close|closed|deactivate|terminate|restriction|limited access)\b', full_content)) and not has_specific_account_info,
-        'verify_account': bool(re.search(r'\b(verify your account|confirm your identity|update your information|validate your account|re-verify)\b', full_content)),
-        'money_request': bool(re.search(r'\b(wire transfer|western union|moneygram|bitcoin|cryptocurrency|payment required|send money|pay now)\b', full_content)),
-        'prizes': bool(re.search(r'\b(congratulations|won|winner|prize|lottery|sweepstakes|million dollars|inheritance|beneficiary)\b', full_content)),
-        'tax_refund': bool(re.search(r'\b(tax refund|irs refund|government refund|stimulus payment)\b', full_content)),
-        'click_link': bool(re.search(r'\b(click here|click this link|click below|click now)\b', full_content)) and not has_specific_account_info,
-        'personal_info_request': bool(re.search(r'\b(social security|ssn|password|pin|account number|routing number|credit card)\b', full_content)) and 'enter' in full_content,
-        'poor_grammar': len(re.findall(r'[.!?]{2,}|[A-Z]{5,}', text)) > 3,
-        'suspicious_attachment': bool(re.search(r'attachment.*(\.exe|\.scr|\.vbs|\.pif|\.cmd|\.bat|\.jar|\.zip|\.rar)', full_content))
-    }
-    
-    return suspicious_indicators
-
-def get_openai_key():
-    """Get OpenAI API key from Secrets Manager with caching."""
-    global _openai_key_cache
-    
-    if _openai_key_cache:
-        log.info("Cache HIT - returning cached OpenAI key")
-        return _openai_key_cache
-    
-    log.info("Cache MISS - fetching OpenAI key from Secrets Manager")
+def check_rate_limit(email_address):
+    """
+    Check if email has exceeded rate limit.
+    Returns tuple (is_allowed, current_count)
+    """
     try:
-        secret_name = os.environ["OPENAI_SECRET_NAME"]
-        response = secrets.get_secret_value(SecretId=secret_name)
-        secret_data = json.loads(response["SecretString"])
-        _openai_key_cache = secret_data["api_key"]
-        return _openai_key_cache
-    except Exception as e:
-        log.error(f"Failed to retrieve OpenAI API key: {str(e)}")
-        raise
-
-def classify(message):
-    """Classify text as SAFE, SCAM, or UNSURE using OpenAI GPT-4."""
-    try:
-        # Extract sender information
-        sender = message.get("sender", "")
-        sender_domain = extract_sender_domain(sender)
-        is_public_domain = is_public_email_domain(sender_domain)
-        is_known_company = check_domain_legitimacy(sender_domain)
+        # Calculate time window
+        now = datetime.utcnow()
+        window_start = now - timedelta(minutes=RATE_LIMIT_WINDOW_MINUTES)
         
-        # Extract URLs and analyze content
-        text = message.get("text", "")
-        urls = extract_urls_from_text(text)
-        suspicious_indicators = analyze_email_content(message)
-        
-        # Claims to be from a company but uses public email = INSTANT SCAM
-        company_claim_pattern = r'\b(bank|paypal|amazon|apple|microsoft|google|netflix|ebay|fedex|ups|irs|government|support team|customer service|security team|account team)\b'
-        claims_to_be_company = bool(re.search(company_claim_pattern, text.lower()))
-        
-        if is_public_domain and claims_to_be_company:
-            log.info(f"Instant scam detection: Public domain {sender_domain} claiming to be a company")
-            return {
-                "label": "SCAM",
-                "reason": "Fraudulent sender using public email",
-                "detailed_reason": f"This email claims to be from a legitimate company but is sent from {sender_domain}, a public email domain. Real companies NEVER use Gmail, Yahoo, Outlook, etc."
-            }
-        
-        # Prepare enhanced prompt for AI
-        api_key = get_openai_key()
-        
-        system_prompt = """You are an expert email security analyst specializing in scam detection. Analyze emails with these critical rules:
-
-FUNDAMENTAL RULE: Real companies NEVER send official communications from public email domains (@gmail.com, @yahoo.com, @outlook.com, @hotmail.com, etc.). Any email claiming to be from a bank, PayPal, Amazon, or any company but sent from a public email domain is 100% a SCAM.
-
-IMPORTANT: Many legitimate companies use specialized subdomains and email marketing domains:
-- Subdomains: ealerts.bankofamerica.com, alerts.chase.com, email.netflix.com
-- Marketing domains: email-carmax.com, mail.company.com
-- These are LEGITIMATE if they are subdomains of the actual company domain
-
-Classification Guidelines:
-
-SCAM indicators:
-- Sender uses public email domain (Gmail, Yahoo, etc.) while claiming to be a company
-- Domain that looks similar but isn't the real company (bankofamerica-alerts.com vs ealerts.bankofamerica.com)
-- Requests sensitive information (passwords, SSN, credit card details)
-- Contains urgent threats (account suspension, immediate action required) WITHOUT specific details
-- Promises unexpected money (lottery, inheritance, tax refund)
-- Has suspicious links to non-company domains
-- Poor grammar/spelling from supposed professional entity
-- Generic greetings without your name or account details
-
-SAFE indicators:
-- From legitimate company subdomain (e.g., ealerts.bankofamerica.com)
-- Contains specific account details (last 4 digits, specific amounts, dates)
-- Routine account notifications (low balance alerts, transaction confirmations)
-- Professional formatting matching company's usual style
-- Links go to the official company domain
-- No requests for you to provide sensitive information
-- Personalized with your name or partial account number
-
-UNSURE when:
-- Domain seems legitimate but content is suspicious
-- Cannot definitively determine if safe or scam
-
-Return JSON: {"label":"SAFE|SCAM|UNSURE","reason":"brief explanation under 120 chars","detailed_reason":"1-2 sentences explaining the specific factors"}"""
-
-        # Build context for the AI
-        suspicious_count = sum(suspicious_indicators.values())
-        suspicious_items = [k.replace('_', ' ') for k, v in suspicious_indicators.items() if v]
-        
-        email_context = f"""
-Email Analysis:
-- Sender email: {sender}
-- Sender domain: {sender_domain}
-- Is public email domain: {is_public_domain}
-- Claims to be from company: {claims_to_be_company}
-- Domain appears legitimate: {is_known_company}
-- Number of URLs in email: {len(urls)}
-- Suspicious indicators found: {suspicious_count} ({', '.join(suspicious_items) if suspicious_items else 'none'})
-
-Email subject: {message.get('subject', 'No subject')}
-
-Email content:
-{text[:4000]}
-"""
-        
-        # Make API request
-        url = "https://api.openai.com/v1/chat/completions"
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json"
-        }
-        
-        data = {
-            "model": "gpt-4o-mini",
-            "response_format": {"type": "json_object"},
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": email_context}
-            ],
-            "temperature": 0.1,  # Very low for consistency
-            "max_tokens": 300
-        }
-        
-        req = urllib.request.Request(
-            url,
-            data=json.dumps(data).encode('utf-8'),
-            headers=headers
+        # Query recent emails from this sender
+        # We'll store rate limit data in the suppression table with a special prefix
+        response = suppression_table.get_item(
+            Key={'email': f'rate_limit#{email_address.lower()}'}
         )
         
-        with urllib.request.urlopen(req, timeout=20) as response:
-            result = json.loads(response.read().decode('utf-8'))
+        if 'Item' in response:
+            item = response['Item']
+            # Check if we have a valid rate limit entry
+            if 'count' in item and 'window_start' in item:
+                item_window_start = datetime.fromisoformat(item['window_start'])
+                
+                # If the window has expired, start a new one
+                if item_window_start < window_start:
+                    # Reset the counter
+                    update_rate_limit_count(email_address, 1)
+                    return (True, 1)
+                else:
+                    # Check if limit exceeded
+                    current_count = int(item['count'])
+                    if current_count >= RATE_LIMIT_MAX_EMAILS:
+                        return (False, current_count)
+                    else:
+                        # Increment counter
+                        update_rate_limit_count(email_address, current_count + 1, item_window_start.isoformat())
+                        return (True, current_count + 1)
         
-        # Extract and validate classification
-        content = result["choices"][0]["message"]["content"]
-        classification = json.loads(content)
+        # No rate limit entry exists, create one
+        update_rate_limit_count(email_address, 1)
+        return (True, 1)
         
-        if "label" not in classification or classification["label"] not in ["SAFE", "SCAM", "UNSURE"]:
-            classification = {
-                "label": "UNSURE",
-                "reason": "Unable to determine classification",
-                "detailed_reason": "The analysis could not definitively determine if this is safe or a scam. Exercise caution."
-            }
-        
-        log.info(f"AI Classification: {classification['label']} for {sender_domain}")
-        return classification
-        
-    except urllib.error.URLError as e:
-        log.error(f"OpenAI API error: {str(e)}")
-        return {
-            "label": "UNSURE",
-            "reason": "Analysis service temporarily unavailable",
-            "detailed_reason": "Could not complete analysis. When in doubt, don't click links or share personal information."
-        }
     except Exception as e:
-        log.error(f"Classification error: {str(e)}")
-        return {
-            "label": "UNSURE",
-            "reason": "Service error - treat with caution",
-            "detailed_reason": "Analysis service encountered an error. Please exercise caution with this message."
-        }
+        log.error(f"Error checking rate limit for {email_address}: {str(e)}")
+        # On error, allow the email through but log the issue
+        return (True, 0)
 
-def get_emoji(label):
-    """Return appropriate emoji for the label."""
-    emoji_map = {
-        "SAFE": "✅",
-        "SCAM": "🚨",
-        "UNSURE": "⚠️"
-    }
-    return emoji_map.get(label, "❓")
+def update_rate_limit_count(email_address, count, window_start=None):
+    """
+    Update the rate limit counter for an email address
+    """
+    try:
+        if window_start is None:
+            window_start = datetime.utcnow().isoformat()
+        
+        # TTL for rate limit entries (clean up after 24 hours)
+        ttl = int((datetime.utcnow() + timedelta(days=1)).timestamp())
+        
+        suppression_table.put_item(
+            Item={
+                'email': f'rate_limit#{email_address.lower()}',
+                'count': count,
+                'window_start': window_start,
+                'ttl': ttl,
+                'type': 'rate_limit_counter'
+            }
+        )
+    except Exception as e:
+        log.error(f"Error updating rate limit count: {str(e)}")
 
-def get_result_class(label):
-    """Return CSS class for the label."""
-    class_map = {
-        "SAFE": "safe",
-        "SCAM": "scam",
-        "UNSURE": "unsure"
-    }
-    return class_map.get(label, "unsure")
+def add_to_suppression_list(email_address, reason, detail):
+    """
+    Add email to suppression list
+    """
+    try:
+        # Suppress for specified duration
+        if reason == "rate_limit_exceeded":
+            suppress_days = RATE_LIMIT_BLOCK_DAYS
+        else:
+            suppress_days = 180  # Default 6 months for other reasons
+            
+        ttl = int((datetime.utcnow() + timedelta(days=suppress_days)).timestamp())
+        
+        suppression_table.put_item(
+            Item={
+                'email': email_address.lower(),
+                'reason': reason,
+                'detail': detail,
+                'suppressed_at': datetime.utcnow().isoformat(),
+                'ttl': ttl
+            }
+        )
+        
+        log.info(f"Added {email_address} to suppression list. Reason: {reason}")
+        
+    except Exception as e:
+        log.error(f"Error adding to suppression list: {str(e)}")
 
-def generate_html_email(result):
-    """Generate HTML email content based on classification result."""
-    emoji = get_emoji(result["label"])
-    css_class = get_result_class(result["label"])
+def is_email_suppressed(email_address):
+    """
+    Check if email is in suppression list
+    """
+    try:
+        response = suppression_table.get_item(
+            Key={'email': email_address.lower()}
+        )
+        return 'Item' in response
+    except Exception as e:
+        log.error(f"Error checking suppression list: {str(e)}")
+        return False
+
+def extract_original_sender_from_forwarded(email_content):
+    """
+    Extract the original sender from a forwarded email.
+    Looks for common forwarding patterns.
+    """
+    # Common forwarding patterns
+    patterns = [
+        # "From: John Doe <john@example.com>"
+        r'From:\s*([^<\n]+<[^>\n]+>)',
+        r'From:\s*([^\n]+@[^\n]+)',
+        # "From: john@example.com"
+        r'From:\s*([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})',
+        # Apple Mail style: "From: John Doe <john@example.com>"
+        r'From:\s*"?([^"<\n]+)"?\s*<([^>\n]+)>',
+        # Outlook style
+        r'From:\s*([^\[]+)\s*\[mailto:([^\]]+)\]',
+        # Gmail forward style
+        r'---------- Forwarded message ---------\s*From:\s*([^<\n]+<[^>\n]+>)',
+        r'---------- Forwarded message ---------\s*From:\s*([^\n]+)',
+        # Generic forward indicators
+        r'Begin forwarded message:.*?From:\s*([^<\n]+<[^>\n]+>)',
+        r'-------- Original Message --------.*?From:\s*([^<\n]+<[^>\n]+>)',
+    ]
     
-    # Different tips based on result
-    if result["label"] == "SAFE":
-        tips_section = """
-        <div class="tips">
-            <h3>✅ This appears to be legitimate, but always stay vigilant:</h3>
-            <ul>
-                <li>Verify the sender's email address matches official domains</li>
-                <li>Check that any links go to the correct website</li>
-                <li>Be cautious of any unexpected requests, even from known contacts</li>
-                <li>Keep your security software up to date</li>
-            </ul>
-        </div>
-        """
-    else:
-        tips_section = """
-        <div class="tips">
-            <h3>🔍 How to Spot Scams - Key Warning Signs:</h3>
-            <ul>
-                <li><strong>Check the sender's address:</strong> Is it from an official domain? Scammers often use fake or suspicious email addresses</li>
-                <li><strong>Urgency and pressure:</strong> Legitimate companies rarely demand immediate action or threaten consequences</li>
-                <li><strong>Requests for sensitive info:</strong> Never share passwords, Social Security numbers, or banking details via email or text</li>
-                <li><strong>Too good to be true:</strong> Unexpected winnings, inheritance, or get-rich-quick schemes are almost always scams</li>
-                <li><strong>Poor spelling/grammar:</strong> Many scams contain obvious errors or awkward language</li>
-                <li><strong>Suspicious links:</strong> Hover over links to see where they really go before clicking</li>
-                <li><strong>Unexpected attachments:</strong> Don't open attachments from unknown senders</li>
-            </ul>
-        </div>
-        """
+    for pattern in patterns:
+        match = re.search(pattern, email_content, re.IGNORECASE | re.MULTILINE | re.DOTALL)
+        if match:
+            # Extract email address from the match
+            sender_info = match.group(1)
+            # Parse the email address properly
+            name, email_addr = parseaddr(sender_info)
+            if email_addr and '@' in email_addr:
+                log.info(f"Found original sender: {email_addr}")
+                return email_addr
     
-    html_content = f"""<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ScamVanguard Analysis Result</title>
-    <style>
-        body {{
-            font-family: Arial, sans-serif;
-            font-size: 16px;
-            line-height: 1.6;
-            color: #333;
-            max-width: 600px;
-            margin: 0 auto;
-            padding: 20px;
-            background-color: #f9f9f9;
-        }}
-        .container {{
-            background-color: white;
-            padding: 25px;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }}
-        .header {{
-            text-align: center;
-            border-bottom: 2px solid #e0e0e0;
-            padding-bottom: 15px;
-            margin-bottom: 20px;
-        }}
-        .logo {{
-            font-size: 24px;
-            font-weight: bold;
-            color: #2c5aa0;
-        }}
-        .result {{
-            font-size: 20px;
-            font-weight: bold;
-            text-align: center;
-            padding: 15px;
-            border-radius: 5px;
-            margin: 20px 0;
-        }}
-        .safe {{ background-color: #d4edda; color: #155724; }}
-        .scam {{ background-color: #f8d7da; color: #721c24; }}
-        .unsure {{ background-color: #fff3cd; color: #856404; }}
-        .explanation {{
-            background-color: #f8f9fa;
-            padding: 15px;
-            border-left: 4px solid #2c5aa0;
-            margin: 15px 0;
-        }}
-        .tips {{
-            margin-top: 25px;
-            padding: 20px;
-            background-color: #f0f8ff;
-            border-radius: 5px;
-            border: 1px solid #b3d9ff;
-        }}
-        .tips h3 {{
-            color: #2c5aa0;
-            margin-top: 0;
-            font-size: 18px;
-        }}
-        .tips ul {{
-            margin: 10px 0;
-            padding-left: 20px;
-        }}
-        .tips li {{
-            margin-bottom: 8px;
-        }}
-        .footer {{
-            margin-top: 30px;
-            padding-top: 20px;
-            border-top: 1px solid #e0e0e0;
-            font-size: 14px;
-            color: #666;
-            text-align: center;
-        }}
-        .support-link {{
-            color: #2c5aa0;
-            text-decoration: none;
-            font-weight: bold;
-        }}
-        .warning {{
-            background-color: #fff3cd;
-            border: 1px solid #ffeaa7;
-            border-radius: 4px;
-            padding: 10px;
-            margin: 15px 0;
-            font-size: 14px;
-        }}
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <div class="logo">🛡️ ScamVanguard</div>
-            <p>Automated Scam Analysis</p>
-        </div>
+    return None
 
-        <div class="result {css_class}">
-            {emoji} {result['label']}: {result['reason']}
-        </div>
-
-        <div class="explanation">
-            <strong>Why this was flagged:</strong> {result.get('detailed_reason', result['reason'])}
-        </div>
-
-        {tips_section}
-
-        <div class="warning">
-            <strong>⚠️ When in doubt, don't click links or share personal information.</strong> Contact the company directly using official phone numbers or websites.
-        </div>
-
-        <div class="footer">
-            <p>This is an automated analysis. Always verify suspicious messages independently.</p>
-            <p>💙 Created by: <a href="https://haydenjohnson.co" class="support-link">haydenjohnson.co</a></p>
-            <p style="font-size: 12px; color: #888; margin-top: 15px;">
-                This service is provided free of charge. To support our mission of protecting people from scams, 
-                consider visiting <a href="https://scamvanguard.com/donate" class="support-link">scamvanguard.com</a>
-            </p>
-            <p style="font-size: 11px; color: #999; margin-top: 10px;">
-                ScamVanguard | Automated Scam Detection | To stop receiving these emails, simply stop forwarding messages to scan@scamvanguard.com
-            </p>
-        </div>
-    </div>
-</body>
-</html>"""
+def extract_forwarded_content(msg, full_content):
+    """
+    Extract the actual forwarded content from the email.
+    This removes the forwarding headers and gets to the suspicious content.
+    """
+    # Look for common forwarding delimiters
+    forward_patterns = [
+        r'---------- Forwarded message ---------',
+        r'-------- Original Message --------',
+        r'Begin forwarded message:',
+        r'-----Original Message-----',
+        r'> From:',  # Quoted forward
+        r'From:.*?Sent:.*?To:.*?Subject:',  # Outlook pattern
+    ]
     
-    return html_content
-
-def generate_text_email(result):
-    """Generate plain text fallback for email clients that don't support HTML."""
-    emoji = get_emoji(result["label"])
+    for pattern in forward_patterns:
+        match = re.search(pattern, full_content, re.IGNORECASE)
+        if match:
+            # Return everything after the forward delimiter
+            return full_content[match.start():]
     
-    text_content = f"""{emoji} {result['label']}: {result['reason']}
+    # If no forward pattern found, return the whole content
+    return full_content
 
-Analysis Details: {result.get('detailed_reason', result['reason'])}
-
-⚠️ When in doubt, don't click links or share personal information.
-
-Safety Tips:
-• Verify sender addresses
-• Be wary of urgent requests
-• Never share sensitive information via email
-• If it seems too good to be true, it probably is
-
----
-This is an automated analysis from ScamVanguard.
-Created by: haydenjohnson.co
-Support our mission: scamvanguard.com/donate
-
-To stop receiving these emails, simply stop forwarding messages to scan@scamvanguard.com"""
+def extract_original_subject(email_content):
+    """
+    Extract the original subject from forwarded email.
+    """
+    # Look for subject patterns in forwarded content
+    patterns = [
+        r'Subject:\s*(.+?)(?:\n|$)',
+        r'Re:\s*(.+?)(?:\n|$)',
+        r'Fwd:\s*(.+?)(?:\n|$)',
+    ]
     
-    return text_content
+    for pattern in patterns:
+        match = re.search(pattern, email_content, re.IGNORECASE)
+        if match:
+            subject = match.group(1).strip()
+            # Clean up common forward prefixes
+            subject = re.sub(r'^(Fwd?:|Re:|FW:)\s*', '', subject, flags=re.IGNORECASE)
+            return subject
+    
+    return "No Subject"
 
 def lambda_handler(event, context):
-    """Process messages from SQS queue and send classification results via SES."""
-    
-    # Get domain name from environment
-    domain_name = os.environ.get("DOMAIN_NAME", "scamvanguard.com")
-    
-    for record in event["Records"]:
-        try:
-            # Parse the SQS message
-            message = json.loads(record["body"])
+    """
+    Process incoming email from SES, extract content, and queue for classification.
+    """
+    try:
+        # Extract SES event data
+        ses_mail = event["Records"][0]["ses"]["mail"]
+        message_id = ses_mail["messageId"]
+        
+        # S3 key matches the 'object_key_prefix' in Terraform
+        s3_key = f"emails/{message_id}"
+        
+        log.info(f"Processing email: {message_id}")
+        
+        # Get the user who forwarded this (for sending response back)
+        forwarding_user = ses_mail.get("source", "unknown").lower()
+        log.info(f"Email forwarded by: {forwarding_user}")
+        
+        # Check if user is suppressed
+        if is_email_suppressed(forwarding_user):
+            log.warning(f"Email from {forwarding_user} is suppressed. Not processing.")
+            return {
+                "statusCode": 200,
+                "body": json.dumps({"message": "Email from suppressed sender"})
+            }
+        
+        # Check rate limit
+        is_allowed, email_count = check_rate_limit(forwarding_user)
+        
+        if not is_allowed:
+            log.warning(f"Rate limit exceeded for {forwarding_user}. Count: {email_count}")
+            # Add to suppression list
+            add_to_suppression_list(
+                forwarding_user,
+                "rate_limit_exceeded",
+                f"Sent {email_count} emails in {RATE_LIMIT_WINDOW_MINUTES} minutes"
+            )
             
-            # Get the user who forwarded the email (to send response back to them)
-            response_email = message.get('forwarding_user', message.get('sender', 'unknown'))
-            original_sender = message.get('sender', 'unknown')
-            
-            log.info(f"Processing email originally from: {original_sender}")
-            log.info(f"Will send response to: {response_email}")
-            
-            # Classify the content with full message context
-            result = classify(message)
-            
-            log.info(f"Classification result: {result}")
-            
-            # Get the appropriate emoji
-            emoji = get_emoji(result["label"])
-            
-            # Generate email content
-            html_body = generate_html_email(result)
-            text_body = generate_text_email(result)
-            
-            # Try to send email response
-            try:
-                response = ses.send_email(
-                    Source=f"ScamVanguard <noreply@{domain_name}>",
-                    Destination={
-                        'ToAddresses': [response_email]
-                    },
-                    Message={
-                        'Subject': {
-                            'Data': f"ScamVanguard Analysis: {emoji} {result['label']}",
-                            'Charset': 'UTF-8'
-                        },
-                        'Body': {
-                            'Text': {
-                                'Data': text_body,
-                                'Charset': 'UTF-8'
-                            },
-                            'Html': {
-                                'Data': html_body,
-                                'Charset': 'UTF-8'
-                            }
-                        }
-                    }
-                )
-                
-                log.info(f"Email sent to {response_email}, MessageId: {response['MessageId']}")
-                
-            except ClientError as e:
-                error_code = e.response['Error']['Code']
-                error_message = e.response['Error']['Message']
-                
-                if error_code == 'MessageRejected':
-                    log.error(f"SES MessageRejected: {error_message}")
-                    log.error(f"Make sure {response_email} is verified in SES (sandbox mode) or move SES out of sandbox mode")
-                    # Don't re-raise for email sending errors in sandbox mode
-                    # Just log and continue
-                else:
-                    raise
-            
-        except Exception as e:
-            log.error(f"Error processing record: {str(e)}")
-            # Re-raise to let Lambda retry (respecting the DLQ settings)
-            raise
-    
-    return {"statusCode": 200, "body": json.dumps("Messages processed successfully")}
+            # Optionally, you could still send them ONE final email explaining why they're blocked
+            # For now, we'll just not process it
+            return {
+                "statusCode": 429,
+                "body": json.dumps({"message": "Rate limit exceeded"})
+            }
+        
+        log.info(f"Rate limit check passed. Email #{email_count} in current window for {forwarding_user}")
+        
+        # Retrieve email from S3
+        response = s3.get_object(Bucket=BUCKET, Key=s3_key)
+        raw_email = response["Body"].read()
+        
+        # Parse email
+        msg = BytesParser(policy=policy.default).parsebytes(raw_email)
+        
+        # Extract text content (prefer plain text over HTML)
+        body = ""
+        
+        # Try to get the best body representation
+        body_part = msg.get_body(preferencelist=("plain", "html"))
+        if body_part:
+            body = body_part.get_content()
+        else:
+            # Fallback: walk through all parts
+            for part in msg.walk():
+                if part.get_content_type() == "text/plain":
+                    body = part.get_payload(decode=True).decode('utf-8', errors='ignore')
+                    break
+                elif part.get_content_type() == "text/html" and not body:
+                    body = part.get_payload(decode=True).decode('utf-8', errors='ignore')
+        
+        # Extract the forwarded content
+        forwarded_content = extract_forwarded_content(msg, body)
+        
+        # Try to extract the original sender from the forwarded email
+        original_sender = extract_original_sender_from_forwarded(forwarded_content)
+        
+        # If we couldn't find the original sender, check email headers
+        if not original_sender:
+            # Sometimes the original sender is in the email headers as "X-Forwarded-From"
+            for header in ["X-Forwarded-From", "X-Original-From", "Reply-To"]:
+                if msg.get(header):
+                    original_sender = msg.get(header)
+                    break
+        
+        # Extract original subject from forwarded content
+        original_subject = extract_original_subject(forwarded_content)
+        
+        # If still no original sender found, note this in the sender field
+        if not original_sender:
+            log.warning("Could not extract original sender from forwarded email")
+            original_sender = "unknown-sender@unknown.domain"
+        
+        # Check for attachments in the original email
+        has_attachments = any(
+            part.get_content_disposition() == "attachment"
+            for part in msg.walk()
+        )
+        
+        # Also check for image attachments (screenshots)
+        has_images = any(
+            part.get_content_type().startswith("image/")
+            for part in msg.walk()
+        )
+        
+        # Prepare job for classification queue
+        job = {
+            "message_id": message_id,
+            "sender": original_sender,  # Original sender of suspicious email
+            "forwarding_user": forwarding_user,  # User who forwarded to ScamVanguard
+            "subject": original_subject,
+            "text": forwarded_content[:250_000],  # Stay under SQS 256KB limit
+            "has_attachments": has_attachments,
+            "has_images": has_images,
+            "s3_key": s3_key,
+            "timestamp": ses_mail.get("timestamp", ""),
+            "rate_limit_count": email_count  # Include for monitoring
+        }
+        
+        # Log what we extracted
+        log.info(f"Extracted - Original sender: {original_sender}, Subject: {original_subject[:50]}...")
+        
+        # Send to SQS
+        sqs.send_message(
+            QueueUrl=QUEUE_URL,
+            MessageBody=json.dumps(job)
+        )
+        
+        log.info(f"Successfully queued email {message_id} for classification")
+        
+        return {
+            "statusCode": 200,
+            "body": json.dumps({"message": "Email processed successfully"})
+        }
+        
+    except Exception as e:
+        log.error(f"Error processing email: {str(e)}")
+        # Re-raise to let Lambda retry
+        raise

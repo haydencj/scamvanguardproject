@@ -53,3 +53,8 @@ variable "per_sender_daily_limit" {
   type        = number
   default     = 10
 }
+
+variable "forward_email" {
+  description = "email to foward to from contact@scamvanguard.com"
+  type = string
+}

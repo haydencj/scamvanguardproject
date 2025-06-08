@@ -16,6 +16,8 @@ log.setLevel(logging.INFO)
 ses = boto3.client("ses")
 secrets = boto3.client("secretsmanager")
 sqs = boto3.client("sqs")
+dynamodb = boto3.resource('dynamodb')
+suppression_table = dynamodb.Table('ScamVanguardEmailSuppression')
 
 # Cache for secrets to avoid repeated API calls
 _openai_key_cache = None
@@ -70,6 +72,19 @@ LEGITIMATE_EMAIL_PATTERNS = [
     r'.*\.amazonses\.com$', # Amazon SES
     r'.*\.messagebus\.com$' # MessageBus
 ]
+
+def is_email_suppressed(email):
+    """
+    Check if email is in our suppression list
+    """
+    try:
+        response = suppression_table.get_item(
+            Key={'email': email.lower()}
+        )
+        return 'Item' in response
+    except Exception:
+        # If we can't check, err on the side of caution and don't send
+        return True
 
 def extract_sender_domain(sender_email):
     """Extract domain from email address."""
@@ -535,8 +550,17 @@ def lambda_handler(event, context):
             response_email = message.get('forwarding_user', message.get('sender', 'unknown'))
             original_sender = message.get('sender', 'unknown')
             
+            # Check suppression list first
+            if is_email_suppressed(response_email):
+                print(f"Email {response_email} is suppressed, not sending response")
+                return {
+                    'statusCode': 200,
+                    'body': json.dumps('Email suppressed, no response sent')
+                }
+
             log.info(f"Processing email originally from: {original_sender}")
             log.info(f"Will send response to: {response_email}")
+            
             
             # Classify the content with full message context
             result = classify(message)
