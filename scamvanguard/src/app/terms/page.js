@@ -183,7 +183,7 @@ export default function Terms() {
             </p>
             <p className="mt-2">
               <a href="mailto:legal@scamvanguard.com" className="text-blue-600 hover:underline">
-                legal@scamvanguard.com
+                contact@scamvanguard.com
               </a>
             </p>
           </section>
