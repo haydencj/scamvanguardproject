@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import Footer from '../components/Footer';
+import Footer from '/components/Footer';
 
 export default function Privacy() {
   return (
@@ -43,7 +43,7 @@ export default function Privacy() {
             <h2 className="text-2xl font-semibold text-gray-900 mb-4">Our Privacy Promise</h2>
             <div className="bg-blue-50 border-l-4 border-blue-600 p-4 mb-6">
               <p className="text-gray-700">
-                <strong>All emails and attachments are automatically deleted after 24 hours.</strong> We don't keep your data longer than necessary to provide the service.
+                <strong>All emails and attachments are automatically deleted after 24 hours.</strong> We don&apos;t keep your data longer than necessary to provide the service.
               </p>
             </div>
           </section>
@@ -100,7 +100,7 @@ export default function Privacy() {
               <li><strong>Twilio</strong> - For SMS support (coming soon)</li>
             </ul>
             <p className="text-gray-600 mt-4">
-              These services process data according to their own privacy policies. We've configured them to minimize data retention and maximize security.
+              These services process data according to their own privacy policies. We&apos;ve configured them to minimize data retention and maximize security.
             </p>
           </section>
 
@@ -124,7 +124,7 @@ export default function Privacy() {
               <li>Or visit our <Link href="/unsubscribe" className="text-blue-600 hover:underline">unsubscribe page</Link></li>
             </ol>
             <p className="text-gray-600">
-              Your email will be added to our suppression list, and you'll receive a confirmation. You can resubscribe at any time by forwarding a new email to our service.
+              Your email will be added to our suppression list, and you&apos;ll receive a confirmation. You can resubscribe at any time by forwarding a new email to our service.
             </p>
           </section>
 
@@ -140,16 +140,16 @@ export default function Privacy() {
               <div>
                 <h3 className="font-semibold text-gray-900 mb-2">CCPA (California Users)</h3>
                 <p className="text-gray-600">
-                  We don't sell personal information. California residents have the right to know what data we collect (detailed above) and to opt-out of the service at any time.
+                  We don&apos;t sell personal information. California residents have the right to know what data we collect (detailed above) and to opt-out of the service at any time.
                 </p>
               </div>
             </div>
           </section>
 
           <section className="mb-8">
-            <h2 className="text-2xl font-semibold text-gray-900 mb-4">Children's Privacy</h2>
+            <h2 className="text-2xl font-semibold text-gray-900 mb-4">Children&apos;s Privacy</h2>
             <p className="text-gray-600">
-              ScamVanguard is not intended for use by children under 13. We don't knowingly collect data from children. If you believe a child has used our service, please contact us.
+              ScamVanguard is not intended for use by children under 13. We don&apos;t knowingly collect data from children. If you believe a child has used our service, please contact us.
             </p>
           </section>
 

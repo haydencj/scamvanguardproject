@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import Footer from '../components/Footer';
+import Footer from '/components/Footer';
 
 export default function HowItWorks() {
   return (
@@ -48,8 +48,8 @@ export default function HowItWorks() {
             <div className="flex-grow">
               <h3 className="text-xl font-semibold text-gray-900 mb-2">You Forward the Suspicious Email</h3>
               <p className="text-gray-600 mb-4">
-                Simply forward any email you're unsure about to <span className="font-mono bg-gray-100 px-2 py-1 rounded">scan@scamvanguard.com</span>. 
-                You don't need to add any message - just forward it as-is.
+                Simply forward any email you&apos;re unsure about to <span className="font-mono bg-gray-100 px-2 py-1 rounded">scan@scamvanguard.com</span>. 
+                You don&apos;t need to add any message - just forward it as-is.
               </p>
               <div className="bg-gray-50 p-4 rounded-lg">
                 <p className="text-sm text-gray-600 font-medium mb-2">Pro tip:</p>
@@ -92,7 +92,7 @@ export default function HowItWorks() {
             <div className="flex-grow">
               <h3 className="text-xl font-semibold text-gray-900 mb-2">You Receive a Clear Verdict</h3>
               <p className="text-gray-600 mb-4">
-                Within minutes, you'll receive an email response with one of three verdicts:
+                Within minutes, you&apos;ll receive an email response with one of three verdicts:
               </p>
               <div className="space-y-3">
                 <div className="flex items-start gap-3">
@@ -160,7 +160,7 @@ export default function HowItWorks() {
             <div className="bg-white rounded p-4">
               <p className="font-semibold text-gray-900 mb-2">Our Response:</p>
               <p className="text-gray-700">
-                <span className="font-semibold">✅ SAFE</span> - This appears to be a legitimate receipt from Apple. The sender domain is correct, the message matches standard Apple formatting, and it's confirming a regular subscription charge. If you have this subscription, this email is genuine.
+                <span className="font-semibold">✅ SAFE</span> - This appears to be a legitimate receipt from Apple. The sender domain is correct, the message matches standard Apple formatting, and it&apos;s confirming a regular subscription charge. If you have this subscription, this email is genuine.
               </p>
             </div>
           </div>
@@ -179,7 +179,7 @@ export default function HowItWorks() {
             <div className="bg-white rounded p-4">
               <p className="font-semibold text-gray-900 mb-2">Our Response:</p>
               <p className="text-gray-700">
-                <span className="font-semibold">⚠️ UNSURE</span> - This email could be legitimate or a scam. While it doesn't contain obvious scam indicators, unsolicited investment offers are often fraudulent. If you don't know this person, it's best to ignore. Never send money to unknown contacts.
+                <span className="font-semibold">⚠️ UNSURE</span> - This email could be legitimate or a scam. While it doesn&apos;t contain obvious scam indicators, unsolicited investment offers are often fraudulent. If you don&apos;t know this person, it&apos;s best to ignore. Never send money to unknown contacts.
               </p>
             </div>
           </div>
@@ -260,7 +260,7 @@ export default function HowItWorks() {
         <div className="bg-blue-50 rounded-lg p-6 mb-6">
           <h3 className="font-semibold text-gray-900 mb-3">How Accurate Is ScamVanguard?</h3>
           <p className="text-gray-700 mb-4">
-            Our AI-powered analysis is highly effective at detecting common scam patterns and has been trained on thousands of examples. However, like all AI systems, it's not perfect.
+            Our AI-powered analysis is highly effective at detecting common scam patterns and has been trained on thousands of examples. However, like all AI systems, it&apos;s not perfect.
           </p>
           <div className="space-y-2">
             <p className="text-gray-700">

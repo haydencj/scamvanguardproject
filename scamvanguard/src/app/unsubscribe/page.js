@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import Footer from '../components/Footer';
+import Footer from '/components/Footer';
 
 export default function Unsubscribe() {
   return (
@@ -38,7 +38,7 @@ export default function Unsubscribe() {
         <div className="bg-blue-50 border-l-4 border-blue-600 p-6 mb-8">
           <h2 className="text-lg font-semibold text-gray-900 mb-2">No Unsubscribe Needed!</h2>
           <p className="text-gray-700">
-            ScamVanguard doesn't send any emails unless you forward something to us. To stop using the service, simply stop forwarding emails to scan@scamvanguard.com.
+            ScamVanguard doesn&apos;t send any emails unless you forward something to us. To stop using the service, simply stop forwarding emails to scan@scamvanguard.com.
           </p>
         </div>
 
@@ -50,10 +50,10 @@ export default function Unsubscribe() {
             </p>
             <ul className="list-disc pl-6 space-y-2 text-gray-600">
               <li>When you forward an email to us → We analyze it and send you a response</li>
-              <li>When you don't forward anything → We don't contact you at all</li>
+              <li>When you don&apos;t forward anything → We don&apos;t contact you at all</li>
             </ul>
             <p className="text-gray-600 mt-4">
-              There's no mailing list, no newsletters, and no automated messages. You're in complete control.
+              There&apos;s no mailing list, no newsletters, and no automated messages. You&apos;re in complete control.
             </p>
           </div>
         </section>
@@ -64,21 +64,21 @@ export default function Unsubscribe() {
             <div className="bg-gray-50 rounded-lg p-6">
               <h3 className="font-medium text-gray-900 mb-2">Do I need to unsubscribe?</h3>
               <p className="text-gray-600">
-                No! There's nothing to unsubscribe from. We don't maintain a mailing list or send any unsolicited emails. We only respond to emails you send us.
+                No! There&apos;s nothing to unsubscribe from. We don&apos;t maintain a mailing list or send any unsolicited emails. We only respond to emails you send us.
               </p>
             </div>
 
             <div className="bg-gray-50 rounded-lg p-6">
               <h3 className="font-medium text-gray-900 mb-2">Will you keep my email address?</h3>
               <p className="text-gray-600">
-                Your email and any forwarded content are automatically deleted from our systems after 24 hours. We don't store email addresses or maintain user accounts.
+                Your email and any forwarded content are automatically deleted from our systems after 24 hours. We don&apos;t store email addresses or maintain user accounts.
               </p>
             </div>
 
             <div className="bg-gray-50 rounded-lg p-6">
               <h3 className="font-medium text-gray-900 mb-2">What if I accidentally forward something?</h3>
               <p className="text-gray-600">
-                No problem! You'll receive one analysis response for that email, and then nothing else. Your data will be deleted after 24 hours as usual.
+                No problem! You&apos;ll receive one analysis response for that email, and then nothing else. Your data will be deleted after 24 hours as usual.
               </p>
             </div>
 
@@ -90,9 +90,9 @@ export default function Unsubscribe() {
             </div>
 
             <div className="bg-gray-50 rounded-lg p-6">
-              <h3 className="font-medium text-gray-900 mb-2">What if I keep getting responses I didn't ask for?</h3>
+              <h3 className="font-medium text-gray-900 mb-2">What if I keep getting responses I didn&apos;t ask for?</h3>
               <p className="text-gray-600">
-                This shouldn't happen since we only respond to emails you forward. If you're receiving unexpected emails from us, please contact us at privacy@scamvanguard.com so we can investigate.
+                This shouldn&apos;t happen since we only respond to emails you forward. If you&apos;re receiving unexpected emails from us, please contact us at privacy@scamvanguard.com so we can investigate.
               </p>
             </div>
           </div>
@@ -104,9 +104,9 @@ export default function Unsubscribe() {
             If you want to ensure you never receive responses from ScamVanguard (even if you accidentally forward something), you can:
           </p>
           <ul className="list-disc pl-6 space-y-2 text-gray-600">
-            <li>Add <span className="font-mono bg-gray-100 px-2 py-1 rounded">noreply@scamvanguard.com</span> to your email's block list</li>
+            <li>Add <span className="font-mono bg-gray-100 px-2 py-1 rounded">noreply@scamvanguard.com</span> to your email&apos;s block list</li>
             <li>Create a filter in your email client to automatically delete emails from our domain</li>
-            <li>Mark any response as spam (though we'd prefer you didn't, as it affects our ability to help others)</li>
+            <li>Mark any response as spam (though we&apos;d prefer you didn&apos;t, as it affects our ability to help others)</li>
           </ul>
         </section>
 
@@ -114,12 +114,12 @@ export default function Unsubscribe() {
           <div className="bg-gray-50 rounded-2xl p-8 text-center">
             <h2 className="text-xl font-semibold text-gray-900 mb-4">Remember</h2>
             <p className="text-gray-600 mb-6">
-              You're always in control. Use ScamVanguard when you need it, ignore it when you don't.
+              You&apos;re always in control. Use ScamVanguard when you need it, ignore it when you don&apos;t.
             </p>
             <p className="text-gray-600">
               Questions? Contact us at{' '}
               <a href="mailto:privacy@scamvanguard.com" className="text-blue-600 hover:underline">
-                privacy@scamvanguard.com
+                contact@scamvanguard.com
               </a>
             </p>
           </div>

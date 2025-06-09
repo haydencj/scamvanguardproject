@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import Footer from '../components/Footer';
+import Footer from '/components/Footer';
 
 export default function Terms() {
   return (
@@ -50,7 +50,7 @@ export default function Terms() {
             <h2 className="text-2xl font-semibold text-gray-900 mb-4">2. Acceptable Use</h2>
             <p className="text-gray-600 mb-4">You agree to use ScamVanguard only for:</p>
             <ul className="list-disc pl-6 space-y-2 text-gray-600 mb-4">
-              <li>Checking suspicious emails, texts, or messages you've personally received</li>
+              <li>Checking suspicious emails, texts, or messages you&apos;ve personally received</li>
               <li>Educational purposes to learn about scam tactics</li>
               <li>Helping friends or family members check suspicious content</li>
             </ul>
@@ -103,10 +103,10 @@ export default function Terms() {
             <p className="text-gray-600 mb-4">By using ScamVanguard, you acknowledge and agree that:</p>
             <ul className="list-disc pl-6 space-y-2 text-gray-600">
               <li>You are responsible for the content you submit to the service</li>
-              <li>You won't submit content that violates others' privacy or rights</li>
-              <li>You'll use the service's assessments as one factor in your decision-making, not the sole factor</li>
-              <li>You won't hold ScamVanguard liable for decisions made based on our analysis</li>
-              <li>You'll report any service issues or errors you discover</li>
+              <li>You won&apos;t submit content that violates others&apos; privacy or rights</li>
+              <li>You&apos;ll use the service&apos;s assessments as one factor in your decision-making, not the sole factor</li>
+              <li>You won&apos;t hold ScamVanguard liable for decisions made based on our analysis</li>
+              <li>You&apos;ll report any service issues or errors you discover</li>
             </ul>
           </section>
 
@@ -117,7 +117,7 @@ export default function Terms() {
             </p>
             <ul className="list-disc pl-6 space-y-2 text-gray-600">
               <li>All emails are automatically deleted after 24 hours</li>
-              <li>We don't sell or share your personal information</li>
+              <li>We don&apos;t sell or share your personal information</li>
               <li>We use secure, encrypted connections for all data transmission</li>
             </ul>
           </section>
@@ -158,7 +158,7 @@ export default function Terms() {
           <section className="mb-8">
             <h2 className="text-2xl font-semibold text-gray-900 mb-4">10. Changes to Terms</h2>
             <p className="text-gray-600">
-              We may update these terms from time to time. We'll notify users of significant changes by posting a notice on our website. Continued use of the service after changes constitutes acceptance of the new terms.
+              We may update these terms from time to time. We&apos;ll notify users of significant changes by posting a notice on our website. Continued use of the service after changes constitutes acceptance of the new terms.
             </p>
           </section>
 
