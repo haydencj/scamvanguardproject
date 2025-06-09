@@ -120,7 +120,7 @@ export default function Privacy() {
               If you wish to stop receiving responses from ScamVanguard:
             </p>
             <ol className="list-decimal pl-6 space-y-2 text-gray-600 mb-4">
-              <li>Reply "STOP" to any ScamVanguard email</li>
+              <li>Reply &quot;STOP&quot; to any ScamVanguard email</li>
               <li>Or visit our <Link href="/unsubscribe" className="text-blue-600 hover:underline">unsubscribe page</Link></li>
             </ol>
             <p className="text-gray-600">
@@ -156,7 +156,7 @@ export default function Privacy() {
           <section className="mb-8">
             <h2 className="text-2xl font-semibold text-gray-900 mb-4">Changes to This Policy</h2>
             <p className="text-gray-600">
-              We may update this privacy policy from time to time. The "Last updated" date at the top shows when it was last revised. Continued use of the service after changes constitutes acceptance.
+              We may update this privacy policy from time to time. The &quot;Last updated&quot; date at the top shows when it was last revised. Continued use of the service after changes constitutes acceptance.
             </p>
           </section>
 

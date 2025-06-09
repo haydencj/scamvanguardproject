@@ -77,7 +77,7 @@ export default function Terms() {
               <li>English language support only (other languages coming soon)</li>
               <li>Email size limit of 25MB including attachments</li>
               <li>Response time typically within 10 minutes, but not guaranteed</li>
-              <li>Service availability is provided "as-is" without uptime guarantees</li>
+              <li>Service availability is provided &quot;as-is&quot; without uptime guarantees</li>
             </ul>
           </section>
 
@@ -125,7 +125,7 @@ export default function Terms() {
           <section className="mb-8">
             <h2 className="text-2xl font-semibold text-gray-900 mb-4">7. Disclaimer of Warranties</h2>
             <p className="text-gray-600 mb-4">
-              ScamVanguard is provided "AS IS" and "AS AVAILABLE" without warranties of any kind, either express or implied, including but not limited to:
+              ScamVanguard is provided &quot;AS IS&quot; and &quot;AS AVAILABLE&quot; without warranties of any kind, either express or implied, including but not limited to:
             </p>
             <ul className="list-disc pl-6 space-y-2 text-gray-600">
               <li>Accuracy or reliability of scam detection</li>

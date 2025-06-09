@@ -204,7 +204,7 @@ export default function HowItWorks() {
           <div className="bg-gray-50 rounded-lg p-6">
             <h3 className="font-semibold text-gray-900 mb-3">Advance Fee Fraud</h3>
             <p className="text-gray-600 text-sm mb-3">
-              Promises of large sums of money in exchange for a small upfront payment or "processing fee."
+              Promises of large sums of money in exchange for a small upfront payment or &quot;processing fee.&quot;
             </p>
             <p className="text-sm text-gray-500">
               <strong>Common signs:</strong> Nigerian prince emails, lottery winnings, inheritance claims
@@ -234,7 +234,7 @@ export default function HowItWorks() {
           <div className="bg-gray-50 rounded-lg p-6">
             <h3 className="font-semibold text-gray-900 mb-3">Job Scams</h3>
             <p className="text-gray-600 text-sm mb-3">
-              Fake job offers that require upfront payments or personal information before "hiring."
+              Fake job offers that require upfront payments or personal information before &quot;hiring.&quot;
             </p>
             <p className="text-sm text-gray-500">
               <strong>Common signs:</strong> Too-good-to-be-true salaries, vague job descriptions, upfront fees
@@ -297,7 +297,7 @@ export default function HowItWorks() {
               <svg className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
-              <p className="text-gray-600">Never send money or personal information based solely on an email, even if we mark it as "SAFE"</p>
+              <p className="text-gray-600">Never send money or personal information based solely on an email, even if we mark it as &quot;SAFE&quot;</p>
             </li>
           </ul>
         </div>
