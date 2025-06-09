@@ -495,7 +495,7 @@ def generate_html_email(result):
 
         <div class="footer">
             <p>This is an automated analysis. Always verify suspicious messages independently.</p>
-            <p>💙 Created by: <a href="https://haydenjohnson.co" class="support-link">haydenjohnson.co</a></p>
+            <p>💙 Created by: <a href="https://haydencj" class="support-link">haydenjohnson.co</a></p>
             <p style="font-size: 12px; color: #888; margin-top: 15px;">
                 This service is provided free of charge. To support our mission of protecting people from scams, 
                 consider visiting <a href="https://scamvanguard.com/donate" class="support-link">scamvanguard.com</a>
@@ -528,7 +528,7 @@ Safety Tips:
 
 ---
 This is an automated analysis from ScamVanguard.
-Created by: haydenjohnson.co
+Created by: haydencj.com
 Support our mission: scamvanguard.com/donate
 
 To stop receiving these emails, simply stop forwarding messages to scan@scamvanguard.com"""
