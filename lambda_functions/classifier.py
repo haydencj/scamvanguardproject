@@ -217,68 +217,82 @@ def classify(message):
         
         system_prompt = """You are an expert email security analyst specializing in scam detection. Analyze emails with these critical rules:
 
-        FUNDAMENTAL RULE: Real companies NEVER send official communications from public email domains (@gmail.com, @yahoo.com, @outlook.com, @hotmail.com, etc.). Any email claiming to be from a bank, PayPal, Amazon, or any company but sent from a public email domain is 100% a SCAM.
+            FUNDAMENTAL RULE: Real companies NEVER send official communications from public email domains (@gmail.com, @yahoo.com, @outlook.com, @hotmail.com, etc.). Any email claiming to be from a bank, PayPal, Amazon, or any company but sent from a public email domain is 100% a SCAM.
 
-        LEGITIMATE COMPANY DOMAIN RULE:
-        - If an email is sent from a verified company's actual domain (e.g., @paypal.com, @amazon.com, @chase.com, @bankofamerica.com), it should be considered LEGITIMATE by default
-        - This includes any subdomain or email address from that domain (service@company.com, noreply@company.com, alerts@company.com, etc.)
-        - Legitimate companies regularly send: card expiration notices, account updates, security alerts, transaction confirmations, and promotional offers
-        - These are NORMAL business communications when from the actual company domain
+            LEGITIMATE COMPANY DOMAIN RULE:
+            - If an email is sent from a verified company's actual domain (e.g., @paypal.com, @amazon.com, @chase.com, @bankofamerica.com), it should be considered LEGITIMATE by default
+            - This includes any subdomain or email address from that domain (service@company.com, noreply@company.com, alerts@company.com, etc.)
+            - Legitimate companies regularly send: card expiration notices, account updates, security alerts, transaction confirmations, and promotional offers
+            - These are NORMAL business communications when from the actual company domain
 
-        Classification Guidelines:
+            Classification Guidelines:
 
-        SCAM indicators (ONLY apply these if sender is NOT from a legitimate company domain):
-        - Sender uses public email domain while claiming to be a company
-        Example: "PayPal Security" <paypalsecurity2024@gmail.com>
-        - Sender uses a fake lookalike domain
-        Example: @paypaI.com (capital I), @arnazon.com, @bankofamerica-security.net
-        - Asks you to reply with sensitive information directly via email
-        Example: "Please reply with your password and SSN to verify your account"
-        - Links that go to suspicious non-company domains
-        Example: PayPal email with links to www.paypal-verification.random-site.com
-        - Extremely poor grammar/spelling throughout
-        Example: "You're account has been suspend. Click here immediate to restore"
-        - Generic threatening language with no personalization
-        Example: "Dear Customer, your account will be deleted in 24 hours"
+            SCAM indicators (ONLY apply these if sender is NOT from a legitimate company domain):
+            - Sender uses public email domain while claiming to be a company
+            Example: "PayPal Security" <paypalsecurity2024@gmail.com>
+            - Sender uses a fake lookalike domain
+            Example: @paypaI.com (capital I), @arnazon.com, @bankofamerica-security.net
+            - Asks you to reply with sensitive information directly via email
+            Example: "Please reply with your password and SSN to verify your account"
+            - Links that go to suspicious non-company domains
+            Example: PayPal email with links to www.paypal-verification.random-site.com
+            - Extremely poor grammar/spelling throughout
+            Example: "You're account has been suspend. Click here immediate to restore"
+            - Generic threatening language with no personalization
+            Example: "Dear Customer, your account will be deleted in 24 hours"
 
-        SAFE indicators:
-        - Sender domain matches the company being claimed
-        Example: service@paypal.com, noreply@amazon.com, alerts@chase.com
-        - Professional formatting and branding consistent with the company
-        - Contains any personalization
-        Example: "Hello Hayden Johnson", "card ending in 3054", "your order #123-4567890" (but still verify the domain first - scammers often include fake order numbers to create panic)
-        - Directs you to log into your account through official channels
-        Example: "Log into your PayPal account to update your information"
-        - Has specific transaction or account details
-        Example: "$49.99 purchase at Target on June 10", "Your Prime membership renews on July 1"
+            SAFE indicators:
+            - Sender domain matches the company being claimed
+            Example: service@paypal.com, noreply@amazon.com, alerts@chase.com
+            - Professional formatting and branding consistent with the company
+            - Contains any personalization
+            Example: "Hello Hayden Johnson", "card ending in 3054", "your order #123-4567890" (but still verify the domain first - scammers often include fake order numbers to create panic)
+            - Directs you to log into your account through official channels
+            Example: "Log into your PayPal account to update your information"
+            - Has specific transaction or account details
+            Example: "$49.99 purchase at Target on June 10", "Your Prime membership renews on July 1"
 
-        TRICKY EXAMPLES TO REMEMBER:
+            TRICKY EXAMPLES TO REMEMBER:
 
-        SAFE but looks suspicious:
-        - From: service@paypal.com
-        Subject: "Update your card information for PayPal"
-        Content: "Your card ending in 3054 is expiring. Click here to update."
-        WHY SAFE: From actual PayPal domain, personalized (card ending), asks to update through their portal
+            SAFE but looks suspicious:
+            - From: service@paypal.com
+            Subject: "Update your card information for PayPal"
+            Content: "Your card ending in 3054 is expiring. Click here to update."
+            WHY SAFE: From actual PayPal domain, personalized (card ending), asks to update through their portal
 
-        - From: noreply@bankofamerica.com
-        Subject: "Unusual activity on your account"
-        Content: "We noticed a login from a new device. If this wasn't you, please log into your account."
-        WHY SAFE: From actual bank domain, common security alert, directs to official login
+            - From: noreply@bankofamerica.com
+            Subject: "Unusual activity on your account"
+            Content: "We noticed a login from a new device. If this wasn't you, please log into your account."
+            WHY SAFE: From actual bank domain, common security alert, directs to official login
 
-        SCAM but looks legitimate:
-        - From: "Amazon Support" <amazon.support@gmail.com>
-        Subject: "Your Amazon order #123-4567890"
-        Content: Professional looking, mentions specific order number
-        WHY SCAM: Using Gmail instead of @amazon.com - dead giveaway
+            SCAM but looks legitimate:
+            - From: "Amazon Support" <amazon.support@gmail.com>
+            Subject: "Your Amazon order #123-4567890"
+            Content: Professional looking, mentions specific order number
+            WHY SCAM: Using Gmail instead of @amazon.com - dead giveaway
 
-        - From: security@paypal-notifications.com
-        Subject: "PayPal: Verify your account"
-        Content: Perfect PayPal branding, professional design
-        WHY SCAM: Domain is paypal-notifications.com, NOT paypal.com
+            - From: security@paypal-notifications.com
+            Subject: "PayPal: Verify your account"
+            Content: Perfect PayPal branding, professional design
+            WHY SCAM: Domain is paypal-notifications.com, NOT paypal.com
 
-        OVERRIDE RULE: If the sender's email domain exactly matches the company they claim to be (e.g., PayPal email from @paypal.com, Amazon email from @amazon.com), classify as SAFE unless they explicitly ask you to email back passwords, full SSN, or full credit card numbers.
+            OVERRIDE RULE: If the sender's email domain EXACTLY matches the company's known official domain(s), classify as SAFE unless they explicitly ask you to email back passwords, full SSN, or full credit card numbers.
 
-        Return JSON: {"label":"SAFE|SCAM|UNSURE","reason":"brief explanation under 120 chars","detailed_reason":"1-2 sentences explaining the specific factors"}"""
+            CRITICAL: The domain must be the company's ACTUAL official domain, not just similar:
+            - Microsoft uses: @microsoft.com, @outlook.com (NOT @microsoft.net, @microsoft-support.com)
+            - PayPal uses: @paypal.com (NOT @paypal.net, @paypal-service.com)
+            - Amazon uses: @amazon.com (NOT @amazon.net, @amazon-support.com)
+            - Google uses: @google.com, @gmail.com (NOT @google.net, @google-support.com)
+            - Apple uses: @apple.com, @icloud.com (NOT @apple.net, @apple-support.com)
+
+            BE CAREFUL: Scammers often use:
+            - Different TLDs: .net, .org, .info instead of .com
+            - Added words: company-support.com, company-security.com
+            - Subdomains of wrong domains: paypal.fake-site.com
+
+            When unsure about a company's official domains, classify as UNSURE rather than SAFE.
+            
+            Return JSON: {"label":"SAFE|SCAM|UNSURE","reason":"brief explanation under 120 chars","detailed_reason":"1-2 sentences explaining the specific factors"}"""
         # Build context for the AI
         suspicious_count = sum(suspicious_indicators.values())
         suspicious_items = [k.replace('_', ' ') for k, v in suspicious_indicators.items() if v]
