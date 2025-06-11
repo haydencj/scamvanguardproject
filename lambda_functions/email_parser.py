@@ -9,6 +9,29 @@ from email.parser import BytesParser
 from email.utils import parseaddr
 from datetime import datetime, timedelta
 from decimal import Decimal
+from html.parser import HTMLParser
+
+class HTMLStripper(HTMLParser):
+    """Helper class to strip HTML tags"""
+    def __init__(self):
+        super().__init__()
+        self.reset()
+        self.strict = False
+        self.convert_charrefs = True
+        self.text = []
+
+    def handle_data(self, data):
+        self.text.append(data)
+
+    def get_text(self):
+        return ''.join(self.text)
+
+
+def strip_html(html):
+    """Remove HTML tags from text"""
+    s = HTMLStripper()
+    s.feed(html)
+    return s.get_text()
 
 # Set up logging
 log = logging.getLogger()
@@ -147,38 +170,69 @@ def extract_original_sender_from_forwarded(email_content):
     Extract the original sender from a forwarded email.
     Looks for common forwarding patterns.
     """
-    # Common forwarding patterns
+    # First, try to strip HTML if present
+    if '<' in email_content and '>' in email_content:
+        # Also search in the HTML-stripped version
+        plain_content = strip_html(email_content)
+    else:
+        plain_content = email_content
+    
+    # Log a snippet of what we're searching through
+    log.info(f"Searching for sender in content (first 500 chars): {plain_content[:500]}")
+    
+    # Common forwarding patterns - updated to be more flexible
     patterns = [
-        # "From: John Doe <john@example.com>"
-        r'From:\s*([^<\n]+<[^>\n]+>)',
-        r'From:\s*([^\n]+@[^\n]+)',
-        # "From: john@example.com"
-        r'From:\s*([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})',
-        # Apple Mail style: "From: John Doe <john@example.com>"
-        r'From:\s*"?([^"<\n]+)"?\s*<([^>\n]+)>',
+        # Basic patterns with flexible spacing and quotes
+        r'From:\s*["\']?([^<\n"\'>]+@[^<\n"\'>]+)["\']?',
+        r'From:\s*<?([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})>?',
+        # Pattern with name and email
+        r'From:\s*["\']?([^"\'<\n]+?)["\']?\s*<([^>\n]+@[^>\n]+)>',
+        # Gmail forward style
+        r'------+\s*Forwarded message\s*------+.*?From:\s*<?([^<\n>]+@[^<\n>]+)>?',
         # Outlook style
         r'From:\s*([^\[]+)\s*\[mailto:([^\]]+)\]',
-        # Gmail forward style
-        r'---------- Forwarded message ---------\s*From:\s*([^<\n]+<[^>\n]+>)',
-        r'---------- Forwarded message ---------\s*From:\s*([^\n]+)',
         # Generic forward indicators
-        r'Begin forwarded message:.*?From:\s*([^<\n]+<[^>\n]+>)',
-        r'-------- Original Message --------.*?From:\s*([^<\n]+<[^>\n]+>)',
+        r'Begin forwarded message:.*?From:\s*<?([^<\n>]+@[^<\n>]+)>?',
+        r'----+\s*Original Message\s*----+.*?From:\s*<?([^<\n>]+@[^<\n>]+)>?',
+        # Just email address on a line after "From:"
+        r'From:\s*\n?\s*([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})',
     ]
     
-    for pattern in patterns:
-        match = re.search(pattern, email_content, re.IGNORECASE | re.MULTILINE | re.DOTALL)
-        if match:
-            # Extract email address from the match
-            sender_info = match.group(1)
-            # Parse the email address properly
-            name, email_addr = parseaddr(sender_info)
-            if email_addr and '@' in email_addr:
-                log.info(f"Found original sender: {email_addr}")
-                return email_addr
+    # Try patterns on both HTML and plain content
+    for content in [email_content, plain_content]:
+        for pattern in patterns:
+            matches = re.finditer(pattern, content, re.IGNORECASE | re.MULTILINE | re.DOTALL)
+            for match in matches:
+                # Handle different match group scenarios
+                if match.lastindex == 2:
+                    # Pattern matched name and email separately
+                    email_addr = match.group(2).strip()
+                else:
+                    # Pattern matched email only
+                    email_addr = match.group(1).strip()
+                
+                # Clean up the email address
+                email_addr = email_addr.strip('<>"\' \t\n\r')
+                
+                # Validate it looks like an email
+                if '@' in email_addr and '.' in email_addr.split('@')[1]:
+                    # Additional validation
+                    if not any(char in email_addr for char in ['<', '>', ' ', '\n', '\r', '\t']):
+                        log.info(f"Found original sender: {email_addr}")
+                        return email_addr
+    
+    # Try one more approach - look for standalone email addresses
+    email_pattern = r'\b([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})\b'
+    all_emails = re.findall(email_pattern, plain_content)
+    
+    # Filter out common system emails and the forwarding user's email
+    for email_addr in all_emails:
+        if not any(skip in email_addr.lower() for skip in ['scamvanguard', 'noreply', 'do-not-reply', 'notification']):
+            log.info(f"Found potential original sender via fallback: {email_addr}")
+            return email_addr
     
     return None
-
+    
 def extract_forwarded_content(msg, full_content):
     """
     Extract the actual forwarded content from the email.
@@ -207,6 +261,12 @@ def extract_original_subject(email_content):
     """
     Extract the original subject from forwarded email.
     """
+    # Strip HTML first if present
+    if '<' in email_content and '>' in email_content:
+        plain_content = strip_html(email_content)
+    else:
+        plain_content = email_content
+    
     # Look for subject patterns in forwarded content
     patterns = [
         r'Subject:\s*(.+?)(?:\n|$)',
@@ -215,7 +275,7 @@ def extract_original_subject(email_content):
     ]
     
     for pattern in patterns:
-        match = re.search(pattern, email_content, re.IGNORECASE)
+        match = re.search(pattern, plain_content, re.IGNORECASE)
         if match:
             subject = match.group(1).strip()
             # Clean up common forward prefixes
