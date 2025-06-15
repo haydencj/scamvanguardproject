@@ -165,7 +165,7 @@ def is_email_suppressed(email_address):
         log.error(f"Error checking suppression list: {str(e)}")
         return False
 
-def extract_original_sender_from_forwarded(email_content):
+def extract_original_sender_from_forwarded(email_content, forwarding_user=None):
     """
     Extract the original sender from a forwarded email.
     Looks for common forwarding patterns.
@@ -185,8 +185,8 @@ def extract_original_sender_from_forwarded(email_content):
         # Basic patterns with flexible spacing and quotes
         r'From:\s*["\']?([^<\n"\'>]+@[^<\n"\'>]+)["\']?',
         r'From:\s*<?([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})>?',
-        # Pattern with name and email
-        r'From:\s*["\']?([^"\'<\n]+?)["\']?\s*<([^>\n]+@[^>\n]+)>',
+        # Generic – first address on the From: line (brackets optional)
+        r'From:[^\n]*?\s<?\s*([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})\s*>?',
         # Gmail forward style
         r'------+\s*Forwarded message\s*------+.*?From:\s*<?([^<\n>]+@[^<\n>]+)>?',
         # Outlook style
@@ -227,8 +227,9 @@ def extract_original_sender_from_forwarded(email_content):
     
     # Filter out common system emails and the forwarding user's email
     for email_addr in all_emails:
-        if not any(skip in email_addr.lower() for skip in ['scamvanguard', 'noreply', 'do-not-reply', 'notification']):
-            log.info(f"Found potential original sender via fallback: {email_addr}")
+        if forwarding_user and email_addr.lower() == forwarding_user.lower():
+            continue          # ← don't treat the forwarder as the sender
+        if not any(skip in email_addr.lower() for skip in ['scamvanguard','noreply','do-not-reply','notification']):
             return email_addr
     
     return None
@@ -358,7 +359,7 @@ def lambda_handler(event, context):
         forwarded_content = extract_forwarded_content(msg, body)
         
         # Try to extract the original sender from the forwarded email
-        original_sender = extract_original_sender_from_forwarded(forwarded_content)
+        original_sender = extract_original_sender_from_forwarded(forwarded_content, forwarding_user)
         
         # If we couldn't find the original sender, check email headers
         if not original_sender:

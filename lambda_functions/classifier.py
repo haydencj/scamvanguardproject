@@ -5,8 +5,10 @@ import boto3
 import urllib.request
 import urllib.error
 import re
+import tldextract
 from urllib.parse import urlparse
 from botocore.exceptions import ClientError
+from email.utils import parseaddr
 
 # Set up logging
 log = logging.getLogger()
@@ -62,6 +64,13 @@ LEGITIMATE_COMPANY_DOMAINS = {
     'indeed.com', 'glassdoor.com', 'zillow.com', 'redfin.com', 'apartments.com'
 }
 
+LEGITIMATE_ESP_DOMAINS = {
+    'convertkit.com', 'sendgrid.net', 'mailgun.org', 'rsgsv.net',
+    'mailchimp.com', 'constantcontact.com', 'klaviyo.com', 
+    'braze.com', 'salesforce.com', 'exacttarget.com',
+    'mailjet.com', 'sendinblue.com', 'getresponse.com'
+}
+
 # Common email marketing domain patterns used by legitimate companies
 LEGITIMATE_EMAIL_PATTERNS = [
     r'email[.-].*\.com$',  # email-company.com, email.company.com
@@ -72,6 +81,8 @@ LEGITIMATE_EMAIL_PATTERNS = [
     r'.*\.amazonses\.com$', # Amazon SES
     r'.*\.messagebus\.com$' # MessageBus
 ]
+
+no_cache_extract = tldextract.TLDExtract(cache_dir='/tmp')
 
 def is_email_suppressed(email):
     """
@@ -86,44 +97,52 @@ def is_email_suppressed(email):
         # If we can't check, err on the side of caution and don't send
         return True
 
-def extract_sender_domain(sender_email):
-    """Extract domain from email address."""
-    match = re.search(r'@([^\s>]+)', sender_email)
-    if match:
-        return match.group(1).lower().strip()
-    return None
+def extract_sender_domain(raw_from):
+    """
+    Extract the registrable domain from a From: header.
+    Handles names like 'Chipotle <chipotle@email.chipotle.com>'.
+    """
+    addr = parseaddr(raw_from)[1]              # chipotle@email.chipotle.com
+    if not addr or '@' not in addr:
+        return None
+    full_domain = addr.split('@')[1].lower()   # email.chipotle.com
+    # Use the configured extractor instead of the default
+    ext = no_cache_extract(full_domain)    
+    if not ext.domain or not ext.suffix:
+        return full_domain                     # fallback
+    return f"{ext.domain}.{ext.suffix}"        # chipotle.com
 
 def is_public_email_domain(domain):
-    """Check if the domain is a public email provider."""
+    """True only for *exact* public providers like gmail.com, yahoo.com, etc."""
     if not domain:
         return False
-    return domain in PUBLIC_EMAIL_DOMAINS or any(domain.endswith('.' + public) for public in PUBLIC_EMAIL_DOMAINS)
+    return domain in PUBLIC_EMAIL_DOMAINS   # no sub-domain match
 
 def check_domain_legitimacy(domain):
     """Check if a domain appears to be from a legitimate company."""
     if not domain:
         return False
     
-    # Direct match against known legitimate domains
-    for legit_domain in LEGITIMATE_COMPANY_DOMAINS:
-        if domain == legit_domain or domain.endswith('.' + legit_domain):
-            return True
+        # Exact match for known ESPs (they send on behalf of many companies)
+    if domain in LEGITIMATE_ESP_DOMAINS:
+        return True
+    
+    # Check against known legitimate domains first
+    if domain in LEGITIMATE_COMPANY_DOMAINS:
+        return True
     
     # Check if it's a subdomain of a legitimate company
-    # e.g., ealerts.bankofamerica.com, email-carmax.com
     parts = domain.split('.')
     if len(parts) >= 2:
-        # Check the last two parts (e.g., bankofamerica.com from ealerts.bankofamerica.com)
         base_domain = '.'.join(parts[-2:])
         if base_domain in LEGITIMATE_COMPANY_DOMAINS:
             return True
         
-        # Check the last three parts for domains like co.uk
         if len(parts) >= 3:
             base_domain_extended = '.'.join(parts[-3:])
             if base_domain_extended in LEGITIMATE_COMPANY_DOMAINS:
                 return True
-    
+
     # Check common email marketing patterns
     for pattern in LEGITIMATE_EMAIL_PATTERNS:
         if re.match(pattern, domain):
@@ -162,8 +181,11 @@ def analyze_email_content(message):
         'prizes': bool(re.search(r'\b(congratulations|won|winner|prize|lottery|sweepstakes|million dollars|inheritance|beneficiary)\b', full_content)),
         'tax_refund': bool(re.search(r'\b(tax refund|irs refund|government refund|stimulus payment)\b', full_content)),
         'click_link': bool(re.search(r'\b(click here|click this link|click below|click now)\b', full_content)) and not has_specific_account_info,
-        'personal_info_request': bool(re.search(r'\b(social security|ssn|password|pin|account number|routing number|credit card)\b', full_content)) and 'enter' in full_content,
-        'poor_grammar': len(re.findall(r'[.!?]{2,}|[A-Z]{5,}', text)) > 3,
+        'personal_info_request': bool(
+            re.search(r'\b(social security|ssn|account password|online banking pass|full credit card|routing number)\b',
+                    full_content)
+        ),
+        'poor_grammar': len(re.findall(r'[A-Z]{8,}', text)) > 5,
         'suspicious_attachment': bool(re.search(r'attachment.*(\.exe|\.scr|\.vbs|\.pif|\.cmd|\.bat|\.jar|\.zip|\.rar)', full_content))
     }
     
@@ -195,6 +217,25 @@ def classify(message):
         is_public_domain = is_public_email_domain(sender_domain)
         is_known_company = check_domain_legitimacy(sender_domain)
         
+        # ---------- EARLY EXIT ----------
+        # Legit-looking company domain → SAFE,
+        # unless an executable attachment is present.
+        if is_known_company and not is_public_domain:
+            if not re.search(r'\.(exe|scr|vbs|pif|cmd|bat|jar|zip|rar)$',
+                             message.get("attachments", "")):  # adapt if you store attachment names differently
+                return {
+                    "label": "SAFE",
+                    "reason": "Legitimate company domain",
+                    "detailed_reason": f"{sender_domain} is a recognised company domain; no red-flag attachments detected."
+                }
+
+        if sender_domain in LEGITIMATE_ESP_DOMAINS:
+            return {
+                "label": "SAFE",
+                "reason": "Recognised ESP domain",
+                "detailed_reason": f"{sender_domain} is a verified email-service provider domain used for newsletters/receipts."
+            }
+
         # Extract URLs and analyze content
         text = message.get("text", "")
         urls = extract_urls_from_text(text)
@@ -204,7 +245,8 @@ def classify(message):
         company_claim_pattern = r'\b(bank|paypal|amazon|apple|microsoft|google|netflix|ebay|fedex|ups|irs|government|support team|customer service|security team|account team)\b'
         claims_to_be_company = bool(re.search(company_claim_pattern, text.lower()))
         
-        if is_public_domain and claims_to_be_company:
+        #if is_public_domain and claims_to_be_company:
+        if is_public_domain and not is_known_company and claims_to_be_company:
             log.info(f"Instant scam detection: Public domain {sender_domain} claiming to be a company")
             return {
                 "label": "SCAM",
@@ -224,6 +266,24 @@ def classify(message):
             - This includes any subdomain or email address from that domain (service@company.com, noreply@company.com, alerts@company.com, etc.)
             - Legitimate companies regularly send: card expiration notices, account updates, security alerts, transaction confirmations, and promotional offers
             - These are NORMAL business communications when from the actual company domain
+
+            LEGITIMATE EMAIL SERVICE PATTERNS:
+            Many companies use email services with subdomains - these are SAFE:
+            - anything@email.company.com → SAFE (email subdomain of company)
+            - anything@mail.company.com → SAFE (mail subdomain of company)
+            - anything@notifications.company.com → SAFE (notification subdomain)
+
+            Sub-domains such as email.company.com, mail.company.com and notifications.company.com are **normal** and should be treated exactly like company.com.
+            
+            CRITICAL: email.chipotle.com is NOT a public email domain! It's a subdomain of chipotle.com:
+            - chipotle@email.chipotle.com → SAFE (subdomain of legitimate company)
+            - discover@email.discover.com → SAFE (subdomain of legitimate company)
+            - target@email.target.com → SAFE (subdomain of legitimate company)
+
+            Public email domains are ONLY services like:
+            - @gmail.com, @yahoo.com, @outlook.com, @aol.com, @hotmail.com, etc
+
+            Subdomains of company domains (*.company.com) are PRIVATE company domains, NOT public!
 
             Classification Guidelines:
 
@@ -276,34 +336,64 @@ def classify(message):
             Content: Perfect PayPal branding, professional design
             WHY SCAM: Domain is paypal-notifications.com, NOT paypal.com
 
-            OVERRIDE RULE: If the sender's email domain EXACTLY matches the company's known official domain(s), classify as SAFE unless they explicitly ask you to email back passwords, full SSN, or full credit card numbers.
+            OVERRIDE RULE: To determine if an email is from a legitimate company:
+            1. Check if the sender domain matches the company name being claimed
+            2. Look for standard corporate email patterns: @companyname.com, noreply@companyname.com, etc.
+            3. Consider common legitimate business email services that companies use
 
-            CRITICAL: The domain must be the company's ACTUAL official domain, not just similar:
-            - Microsoft uses: @microsoft.com, @outlook.com (NOT @microsoft.net, @microsoft-support.com)
-            - PayPal uses: @paypal.com (NOT @paypal.net, @paypal-service.com)
-            - Amazon uses: @amazon.com (NOT @amazon.net, @amazon-support.com)
-            - Google uses: @google.com, @gmail.com (NOT @google.net, @google-support.com)
-            - Apple uses: @apple.com, @icloud.com (NOT @apple.net, @apple-support.com)
+            DOMAIN VERIFICATION PROCESS:
+            - If email claims to be from "Chipotle" and is from @chipotle.com → LIKELY LEGITIMATE
+            - If email claims to be from "Discover" and is from @discover.com → LIKELY LEGITIMATE
+            - If email claims to be from "Target" and is from @target.com → LIKELY LEGITIMATE
 
-            BE CAREFUL: Scammers often use:
-            - Different TLDs: .net, .org, .info instead of .com
-            - Added words: company-support.com, company-security.com
-            - Subdomains of wrong domains: paypal.fake-site.com
+            The company doesn't need to be on a specific list - the pattern is what matters:
+            - Company name matches domain name
+            - Professional email structure
+            - Not using public email domains
 
-            When unsure about a company's official domains, classify as UNSURE rather than SAFE.
+            LEGITIMATE EMAIL SERVICE PATTERNS:
+            Many companies use email services that append their domain:
+            - chipotle@email.chipotle.com (subdomain pattern)
+            - discover@mail.discover.com (mail subdomain)
+            - noreply@notifications.company.com (notification subdomain)
+
+            RED FLAGS remain the same:
+            - Company name does NOT match domain (PayPal from @security-alert.com)
+            - Using public email providers (Bank of America from @gmail.com)
+            - Suspicious variations (Discover from @disc0ver.com with zero instead of 'o')
+
+            CLASSIFICATION APPROACH:
+            1. First, check if domain reasonably matches the claimed company
+            2. If yes, look at the content - is it a normal business communication?
+            3. Personalization (your name, partial account numbers) makes it MORE likely to be safe
+            4. Requests to click links to verify/update are NORMAL for legitimate companies
+            5. Only flag as SCAM if domain is clearly fraudulent OR content asks for extremely sensitive info via email
+
+            Examples of SAFE emails from legitimate but unlisted companies:
+            - chipotle@email.chipotle.com: "Your order is ready" → SAFE (legitimate domain pattern)
+            - noreply@discover.com: "Payment received for $XXX.XX" → SAFE (legitimate domain + transaction detail)
+            - alerts@homedepot.com: "Your order #12345 has shipped" → SAFE (legitimate domain + order detail)
+
+            When unsure about a company's official domains, classify as UNSURE rather than SAFE and advise the user to search for official domain.
             
-            Return JSON: {"label":"SAFE|SCAM|UNSURE","reason":"brief explanation under 120 chars","detailed_reason":"1-2 sentences explaining the specific factors"}"""
+            NORMAL ORDER EMAIL RULE:
+            - If the domain is verified legitimate, links that point to the same domain
+            (or its sub-domains) for viewing receipts, rewards, or tracking orders are
+            STANDARD practice and **do not** count as requests for sensitive info.
+
+            Return JSON: {"label":"SAFE|SCAM|UNSURE", "reason":"brief explanation under 120 chars","detailed_reason":"1-2 sentences explaining the specific factors"}"""
+            
         # Build context for the AI
         suspicious_count = sum(suspicious_indicators.values())
-        suspicious_items = [k.replace('_', ' ') for k, v in suspicious_indicators.items() if v]
-        
+        #suspicious_items = [k.replace('_', ' ') for k, v in suspicious_indicators.items() if v]
+        suspicious_items = [k.replace('_', ' ') for k, v in suspicious_indicators.items() if v][:5]  # cap at 5
+
         email_context = f"""
 Email Analysis:
 - Sender email: {sender}
 - Sender domain: {sender_domain}
 - Is public email domain: {is_public_domain}
 - Claims to be from company: {claims_to_be_company}
-- Domain appears legitimate: {is_known_company}
 - Number of URLs in email: {len(urls)}
 - Suspicious indicators found: {suspicious_count} ({', '.join(suspicious_items) if suspicious_items else 'none'})
 
@@ -387,11 +477,20 @@ def get_result_class(label):
     }
     return class_map.get(label, "unsure")
 
-def generate_html_email(result):
+def generate_html_email(result, sender_email=None):
     """Generate HTML email content based on classification result."""
     emoji = get_emoji(result["label"])
     css_class = get_result_class(result["label"])
     
+    # Add sender info if available
+    sender_info = ""
+    if sender_email:
+        sender_info = f"""
+        <div style="background-color: #f8f9fa; padding: 10px; margin: 15px 0; border-radius: 4px;">
+            <strong>Analyzed Email From:</strong> {sender_email}
+        </div>
+        """
+
     # Different tips based on result
     if result["label"] == "SAFE":
         tips_section = """
@@ -529,6 +628,8 @@ def generate_html_email(result):
             <strong>Why this was flagged:</strong> {result.get('detailed_reason', result['reason'])}
         </div>
 
+        {sender_info}
+
         {tips_section}
 
         <div class="warning">
@@ -552,13 +653,17 @@ def generate_html_email(result):
     
     return html_content
 
-def generate_text_email(result):
+def generate_text_email(result, sender_email=None):
     """Generate plain text fallback for email clients that don't support HTML."""
     emoji = get_emoji(result["label"])
-    
+
+    sender_info = f"Analyzed Email From: {sender_email}\n\n" if sender_email else ""
+
     text_content = f"""{emoji} {result['label']}: {result['reason']}
 
 Analysis Details: {result.get('detailed_reason', result['reason'])}
+
+{sender_info}
 
 ⚠️ When in doubt, don't click links or share personal information.
 
@@ -613,8 +718,8 @@ def lambda_handler(event, context):
             emoji = get_emoji(result["label"])
             
             # Generate email content
-            html_body = generate_html_email(result)
-            text_body = generate_text_email(result)
+            html_body = generate_html_email(result, original_sender)
+            text_body = generate_text_email(result, original_sender)
             
             # Try to send email response
             try:
