@@ -10,14 +10,13 @@ export default function Home() {
                 <div className="max-w-4xl mx-auto px-6 py-4">
                     <div className="flex items-center justify-between">
                         <Link href="/" className="flex items-center space-x-2">
-                            <svg width="170" height="170" viewBox="0 0 170 170" fill="none" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
-                                <rect width="180" height="180" fill="url(#pattern0_1_19)" />
-                                <defs>
-                                    <pattern id="pattern0_1_19" patternContentUnits="objectBoundingBox" width="1" height="1">
-                                        <use xlink:href="#image0_1_19" transform="scale(0.00195312)" />
-                                    </pattern>
-                                </defs>
-                            </svg>
+                            <Image
+                                src="/favicon-64x64.png"
+                                alt="ScamVanguard Shield Logo"
+                                width={32}
+                                height={32}
+                                className="w-8 h-8"
+                            />
                             <h1 className="text-xl font-semibold text-gray-900">ScamVanguard</h1>
                         </Link>
                         <div className="flex items-center space-x-6">
