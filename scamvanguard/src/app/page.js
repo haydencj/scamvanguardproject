@@ -11,7 +11,7 @@ export default function Home() {
                     <div className="flex items-center justify-between">
                         <Link href="/" className="flex items-center space-x-2">
                             <Image
-                                src="/favicon-64x64.png"
+                                src="/favicon-128x128.png"
                                 alt="ScamVanguard Shield Logo"
                                 width={32}
                                 height={32}
