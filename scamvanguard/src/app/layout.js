@@ -8,6 +8,7 @@ const structuredData = {
   "@context": "https://schema.org",
   "@type": "WebApplication",
   "name": "ScamVanguard",
+  "alternateName": "Scam Vanguard",
   "description": "Free scam detection service that instantly checks if emails and texts are scams",
   "applicationCategory": "SecurityApplication",
   "url": "https://scamvanguard.com",
@@ -18,7 +19,7 @@ const structuredData = {
   },
   "featureList": [
     "Email scam detection",
-    "SMS/MMS scam detection", 
+    "SMS/MMS scam detection",
     "Instant results",
     "No app download required"
   ],
@@ -34,8 +35,22 @@ export const metadata = {
     default: 'ScamVanguard - Free Scam Detection Service',
     template: '%s | ScamVanguard'
   },
-  description: 'Forward suspicious emails and texts to get instant SAFE/SCAM verdicts. Free scam detection service for seniors and non-technical users.',
-  keywords: ['scam detection', 'email scam checker', 'text scam checker', 'phishing detection', 'senior scam protection'],
+  description: 'ScamVanguard (Scam Vanguard) - Forward suspicious emails and texts to get instant SAFE/SCAM verdicts. Free scam detection service for seniors and non-technical users.',
+  keywords: [
+    'scamvanguard',
+    'scam vanguard',
+    'scam detection',
+    'email scam checker',
+    'scan@scamvanguard.com',
+    'text scam checker',
+    'phishing detection',
+    'senior scam protection',
+    'scam guard',
+    'scamguard'
+  ],
+  alternates: {
+    canonical: 'https://scamvanguard.com',
+  },
   openGraph: {
     title: 'ScamVanguard - Protect Yourself from Scams',
     description: 'Free, instant scam detection. Forward suspicious messages to get SAFE/SCAM verdicts. Protect yourself and family from email fraud.',
