@@ -1,0 +1,247 @@
+name: Deploy Lambda Functions to Production
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'lambda_functions/**'
+      - '.github/workflows/deploy.yml'
+  workflow_dispatch:
+    inputs:
+      force_deploy_all:
+        description: 'Force deploy all functions'
+        type: boolean
+        default: false
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY: scamvanguard/lambda-functions
+
+permissions:
+  id-token: write   # Required for OIDC
+  contents: read    # Required to checkout code
+
+jobs:
+  detect-changes:
+    name: Detect Changed Lambda Functions
+    runs-on: ubuntu-latest
+    outputs:
+      forward_contact: ${{ steps.changes.outputs.forward_contact }}
+      email_parser: ${{ steps.changes.outputs.email_parser }}
+      classifier: ${{ steps.changes.outputs.classifier }}
+      ses_feedback_processor: ${{ steps.changes.outputs.ses_feedback_processor }}
+      any_changes: ${{ steps.changes.outputs.any_changes }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      
+      - name: Detect changes in Lambda functions
+        id: changes
+        run: |
+          # Force deploy all if manually triggered with force_deploy_all=true
+          if [[ "${{ github.event.inputs.force_deploy_all }}" == "true" ]]; then
+            echo "forward_contact=true" >> $GITHUB_OUTPUT
+            echo "email_parser=true" >> $GITHUB_OUTPUT
+            echo "classifier=true" >> $GITHUB_OUTPUT
+            echo "ses_feedback_processor=true" >> $GITHUB_OUTPUT
+            echo "any_changes=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          # Check for changes in each function directory
+          ANY_CHANGES=false
+          
+          if git diff --name-only HEAD^ HEAD | grep -q "lambda_functions/forward_contact/"; then
+            echo "forward_contact=true" >> $GITHUB_OUTPUT
+            ANY_CHANGES=true
+          else
+            echo "forward_contact=false" >> $GITHUB_OUTPUT
+          fi
+          
+          if git diff --name-only HEAD^ HEAD | grep -q "lambda_functions/email_parser/"; then
+            echo "email_parser=true" >> $GITHUB_OUTPUT
+            ANY_CHANGES=true
+          else
+            echo "email_parser=false" >> $GITHUB_OUTPUT
+          fi
+          
+          if git diff --name-only HEAD^ HEAD | grep -q "lambda_functions/classifier/"; then
+            echo "classifier=true" >> $GITHUB_OUTPUT
+            ANY_CHANGES=true
+          else
+            echo "classifier=false" >> $GITHUB_OUTPUT
+          fi
+          
+          if git diff --name-only HEAD^ HEAD | grep -q "lambda_functions/ses_feedback_processor/"; then
+            echo "ses_feedback_processor=true" >> $GITHUB_OUTPUT
+            ANY_CHANGES=true
+          else
+            echo "ses_feedback_processor=false" >> $GITHUB_OUTPUT
+          fi
+          
+          echo "any_changes=$ANY_CHANGES" >> $GITHUB_OUTPUT
+
+  build-and-deploy:
+    name: Build and Deploy Lambda Functions
+    needs: detect-changes
+    if: needs.detect-changes.outputs.any_changes == 'true'
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Configure AWS credentials using OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/GitHubActionsScamVanguardRole
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: GitHubActions-${{ github.run_id }}
+      
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Get commit SHA
+        id: vars
+        run: echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+      
+      # ===== BUILD AND DEPLOY FORWARD_CONTACT =====
+      - name: Build and Deploy - forward_contact
+        if: needs.detect-changes.outputs.forward_contact == 'true'
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: forward-contact-${{ steps.vars.outputs.sha_short }}
+          FUNCTION_NAME: ScamVanguardContactForwarder
+        run: |
+          echo "🔨 Building forward_contact..."
+          cd lambda_functions/forward_contact
+          
+          docker buildx build \
+            --platform linux/amd64 \
+            --provenance=false \
+            -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
+            -t $ECR_REGISTRY/$ECR_REPOSITORY:forward-contact-latest \
+            --push \
+            .
+          
+          echo "🚀 Deploying forward_contact to Lambda..."
+          aws lambda update-function-code \
+            --function-name $FUNCTION_NAME \
+            --image-uri $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          
+          echo "✅ forward_contact deployed successfully!"
+      
+      # ===== BUILD AND DEPLOY EMAIL_PARSER =====
+      - name: Build and Deploy - email_parser
+        if: needs.detect-changes.outputs.email_parser == 'true'
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: email-parser-${{ steps.vars.outputs.sha_short }}
+          FUNCTION_NAME: ScamVanguardEmailParser
+        run: |
+          echo "🔨 Building email_parser..."
+          cd lambda_functions/email_parser
+          
+          docker buildx build \
+            --platform linux/amd64 \
+            --provenance=false \
+            -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
+            -t $ECR_REGISTRY/$ECR_REPOSITORY:email-parser-latest \
+            --push \
+            .
+          
+          echo "🚀 Deploying email_parser to Lambda..."
+          aws lambda update-function-code \
+            --function-name $FUNCTION_NAME \
+            --image-uri $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          
+          echo "✅ email_parser deployed successfully!"
+      
+      # ===== BUILD AND DEPLOY CLASSIFIER =====
+      - name: Build and Deploy - classifier
+        if: needs.detect-changes.outputs.classifier == 'true'
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: classifier-${{ steps.vars.outputs.sha_short }}
+          FUNCTION_NAME: ScamVanguardClassifier
+        run: |
+          echo "🔨 Building classifier..."
+          cd lambda_functions/classifier
+          
+          docker buildx build \
+            --platform linux/amd64 \
+            --provenance=false \
+            -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
+            -t $ECR_REGISTRY/$ECR_REPOSITORY:classifier-latest \
+            --push \
+            .
+          
+          echo "🚀 Deploying classifier to Lambda..."
+          aws lambda update-function-code \
+            --function-name $FUNCTION_NAME \
+            --image-uri $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          
+          echo "✅ classifier deployed successfully!"
+      
+      # ===== BUILD AND DEPLOY SES_FEEDBACK_PROCESSOR =====
+      - name: Build and Deploy - ses_feedback_processor
+        if: needs.detect-changes.outputs.ses_feedback_processor == 'true'
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ses-feedback-processor-${{ steps.vars.outputs.sha_short }}
+          FUNCTION_NAME: ScamVanguardSESFeedbackProcessor
+        run: |
+          echo "🔨 Building ses_feedback_processor..."
+          cd lambda_functions/ses_feedback_processor
+          
+          docker buildx build \
+            --platform linux/amd64 \
+            --provenance=false \
+            -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
+            -t $ECR_REGISTRY/$ECR_REPOSITORY:ses-feedback-processor-latest \
+            --push \
+            .
+          
+          echo "🚀 Deploying ses_feedback_processor to Lambda..."
+          aws lambda update-function-code \
+            --function-name $FUNCTION_NAME \
+            --image-uri $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          
+          echo "✅ ses_feedback_processor deployed successfully!"
+      
+      - name: Generate Deployment Summary
+        run: |
+          echo "# 🚀 Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit:** \`${{ steps.vars.outputs.sha_short }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Triggered by:** @${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Workflow:** ${{ github.workflow }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Deployed Functions" >> $GITHUB_STEP_SUMMARY
+          
+          if [[ "${{ needs.detect-changes.outputs.forward_contact }}" == "true" ]]; then
+            echo "- ✅ **forward_contact** → \`forward-contact-${{ steps.vars.outputs.sha_short }}\`" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [[ "${{ needs.detect-changes.outputs.email_parser }}" == "true" ]]; then
+            echo "- ✅ **email_parser** → \`email-parser-${{ steps.vars.outputs.sha_short }}\`" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [[ "${{ needs.detect-changes.outputs.classifier }}" == "true" ]]; then
+            echo "- ✅ **classifier** → \`classifier-${{ steps.vars.outputs.sha_short }}\`" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [[ "${{ needs.detect-changes.outputs.ses_feedback_processor }}" == "true" ]]; then
+            echo "- ✅ **ses_feedback_processor** → \`ses-feedback-processor-${{ steps.vars.outputs.sha_short }}\`" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "🎉 All deployments completed successfully!" >> $GITHUB_STEP_SUMMARY
