@@ -48,7 +48,7 @@ resource "aws_s3_bucket" "email_attachments" {
 #   }
 # }
 
-# Bucket encryption 
+# Bucket encryption at rest
 resource "aws_s3_bucket_server_side_encryption_configuration" "email_attachments" {
   bucket = aws_s3_bucket.email_attachments.id
 
@@ -117,6 +117,42 @@ resource "aws_s3_bucket_policy" "email_attachments" {
         }
       }
     ]
+  })
+}
+
+# ==================== ECR REPOSITORIES ====================
+
+# Single ECR repository for all Lambda functions
+resource "aws_ecr_repository" "lambda_functions" {
+  name                 = "scamvanguard/lambda-functions"
+  image_tag_mutability = "MUTABLE"
+
+  image_scanning_configuration {
+    scan_on_push = true
+  }
+
+  encryption_configuration {
+    encryption_type = "AES256"
+  }
+}
+
+# Lifecycle policy to keep only recent images
+resource "aws_ecr_lifecycle_policy" "lambda_functions" {
+  repository = aws_ecr_repository.lambda_functions.name
+
+  policy = jsonencode({
+    rules = [{
+      rulePriority = 1
+      description  = "Keep last 10 images per function"
+      selection = {
+        tagStatus     = "any"
+        countType     = "imageCountMoreThan"
+        countNumber   = 10
+      }
+      action = {
+        type = "expire"
+      }
+    }]
   })
 }
 
@@ -232,37 +268,33 @@ resource "aws_sqs_queue" "processing_queue" {
 
 # ==================== LAMBDA FUNCTIONS ====================
 
-# contact@scamvanguard.com fowarder
+# contact@scamvanguard.com forwarder
 resource "aws_lambda_function" "contact_forwarder" {
-  filename         = "lambda_functions/forward_contact.zip"
-  function_name    = "ScamVanguardContactForwarder"
-  handler          = "forward_contact.lambda_handler"
-  runtime          = "python3.9"
-  role             = aws_iam_role.lambda_execution.arn
-  source_code_hash = filebase64sha256("lambda_functions/forward_contact.zip")
-  timeout          = 30
-  memory_size      = 128
+  package_type  = "Image"
+  image_uri     = "${aws_ecr_repository.lambda_functions.repository_url}:forward-contact-latest"
+  function_name = "ScamVanguardContactForwarder"
+  role          = aws_iam_role.lambda_execution.arn
+  timeout       = 30
+  memory_size   = 128
+  
   environment {
     variables = {
       ATTACHMENT_BUCKET = aws_s3_bucket.email_attachments.id
-      # if you ever want a custom prefix, you can pass it too:
-      KEY_PREFIX = "contact/"
-      FORWARD_EMAIL = var.forward_email
+      KEY_PREFIX        = "contact/"
+      FORWARD_EMAIL     = var.forward_email
     }
   }
 }
 
 # Email Parser Lambda
 resource "aws_lambda_function" "email_parser" {
-  filename         = "lambda_functions/email_parser.zip"
-  function_name    = "ScamVanguardEmailParser"
-  role             = aws_iam_role.lambda_execution.arn
-  handler          = "email_parser.lambda_handler"
-  source_code_hash = filebase64sha256("lambda_functions/email_parser.zip")
-  runtime          = "python3.9"
-  timeout          = 60
-  memory_size      = 512
-
+  package_type  = "Image"
+  image_uri     = "${aws_ecr_repository.lambda_functions.repository_url}:email-parser-latest"
+  function_name = "ScamVanguardEmailParser"
+  role          = aws_iam_role.lambda_execution.arn
+  timeout       = 60
+  memory_size   = 512
+  
   environment {
     variables = {
       ATTACHMENT_BUCKET    = aws_s3_bucket.email_attachments.id
@@ -270,7 +302,7 @@ resource "aws_lambda_function" "email_parser" {
       SUPPRESSION_TABLE    = aws_dynamodb_table.email_suppression.name
     }
   }
-
+  
   tracing_config {
     mode = "Active"
   }
@@ -278,15 +310,13 @@ resource "aws_lambda_function" "email_parser" {
 
 # Classifier Lambda
 resource "aws_lambda_function" "classifier" {
-  filename         = "lambda_functions/classifier.zip"
-  function_name    = "ScamVanguardClassifier"
-  role             = aws_iam_role.lambda_execution.arn
-  handler          = "classifier.lambda_handler"
-  source_code_hash = filebase64sha256("lambda_functions/classifier.zip")
-  runtime          = "python3.9"
-  timeout          = 300 # 5 minutes
-  memory_size      = 1024
-
+  package_type  = "Image"
+  image_uri     = "${aws_ecr_repository.lambda_functions.repository_url}:classifier-latest"
+  function_name = "ScamVanguardClassifier"
+  role          = aws_iam_role.lambda_execution.arn
+  timeout       = 300 # 5 minutes
+  memory_size   = 1024
+  
   environment {
     variables = {
       ATTACHMENT_BUCKET  = aws_s3_bucket.email_attachments.id
@@ -298,15 +328,13 @@ resource "aws_lambda_function" "classifier" {
 
 # Suspression List stuff
 resource "aws_lambda_function" "ses_feedback_processor" {
-  filename         = "lambda_functions/ses_feedback_processor.zip"
-  function_name    = "ScamVanguardSESFeedbackProcessor"
-  role             = aws_iam_role.lambda_execution.arn
-  handler          = "ses_feedback_processor.lambda_handler"
-  source_code_hash = filebase64sha256("lambda_functions/ses_feedback_processor.zip")
-  runtime          = "python3.9"
-  timeout          = 60
-  memory_size      = 256 # Smaller than classifier - simpler task
-
+  package_type  = "Image"
+  image_uri     = "${aws_ecr_repository.lambda_functions.repository_url}:ses-feedback-processor-latest"
+  function_name = "ScamVanguardSESFeedbackProcessor"
+  role          = aws_iam_role.lambda_execution.arn
+  timeout       = 60
+  memory_size   = 256 # Smaller than classifier - simpler task
+  
   environment {
     variables = {
       SUPPRESSION_TABLE = aws_dynamodb_table.email_suppression.name
@@ -648,28 +676,28 @@ output "ses_dkim_tokens" {
   description = "DKIM tokens to add to DNS as CNAME records"
 }
 
-output "dns_records_instructions" {
-  value       = <<-EOT
+# output "dns_records_instructions" {
+#   value       = <<-EOT
     
-    ========== REQUIRED DNS RECORDS ==========
+#     ========== REQUIRED DNS RECORDS ==========
     
-    Add these DNS records to ${var.domain_name}:
+#     Add these DNS records to ${var.domain_name}:
     
-    1. Domain Verification (TXT Record):
-       Name: _amazonses.${var.domain_name}
-       Type: TXT
-       Value: ${aws_ses_domain_identity.main.verification_token}
+#     1. Domain Verification (TXT Record):
+#        Name: _amazonses.${var.domain_name}
+#        Type: TXT
+#        Value: ${aws_ses_domain_identity.main.verification_token}
     
-    2. DKIM Records (CNAME Records):
-       ${join("\n       ", [for token in aws_ses_domain_dkim.main.dkim_tokens : "Name: ${token}._domainkey.${var.domain_name}\n       Type: CNAME\n       Value: ${token}.dkim.amazonses.com\n"])}
+#     2. DKIM Records (CNAME Records):
+#        ${join("\n       ", [for token in aws_ses_domain_dkim.main.dkim_tokens : "Name: ${token}._domainkey.${var.domain_name}\n       Type: CNAME\n       Value: ${token}.dkim.amazonses.com\n"])}
     
-    3. MX Record (for receiving email):
-       Name: ${var.domain_name}
-       Type: MX
-       Priority: 10
-       Value: inbound-smtp.${var.aws_region}.amazonaws.com
+#     3. MX Record (for receiving email):
+#        Name: ${var.domain_name}
+#        Type: MX
+#        Priority: 10
+#        Value: inbound-smtp.${var.aws_region}.amazonaws.com
     
-    ==========================================
-  EOT
-  description = "Instructions for DNS configuration"
-}
+#     ==========================================
+#   EOT
+#   description = "Instructions for DNS configuration"
+# }
