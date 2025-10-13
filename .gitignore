@@ -80,3 +80,6 @@ next-env.d.ts
 
 # python venv
 .venv/
+
+# claude
+CLAUDE.md
