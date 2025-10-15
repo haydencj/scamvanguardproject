@@ -415,10 +415,9 @@ def classify(message):
         try:
             response = client.responses.parse(
                 model="gpt-5-mini",  # or gpt-5-nano for lower cost
-                modalities=["text"],
-                instructions=system_prompt,
                 input=[
-                    {"type": "message", "role": "user", "content": email_context}
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": email_context}
                 ],
                 text_format=EmailClassification,
                 temperature=0.2, # Higher values like 0.8 will make the output more random, while lower values like 0.2 will make it more focused and deterministic.
