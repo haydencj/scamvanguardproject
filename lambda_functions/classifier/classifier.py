@@ -420,8 +420,6 @@ def classify(message):
                     {"role": "user", "content": email_context}
                 ],
                 text_format=EmailClassification,
-                temperature=0.2, # Higher values like 0.8 will make the output more random, while lower values like 0.2 will make it more focused and deterministic.
-                #max_output_tokens=300
             )
 
             # Extract the parsed structured output
