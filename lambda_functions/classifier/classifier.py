@@ -630,7 +630,7 @@ def generate_html_email(result, sender_email=None):
 
         <div class="footer">
             <p>This is an automated analysis. Always verify suspicious messages independently.</p>
-            <p>💙 Created by: <a href="https://haydencj" class="support-link">haydenjohnson.co</a></p>
+            <p>💙 Created by: <a href="https://www.haydencj.com/" class="support-link">haydencj.com</a></p>
             <p style="font-size: 12px; color: #888; margin-top: 15px;">
                 This service is provided free of charge. To support our mission of protecting people from scams, 
                 consider visiting <a href="https://scamvanguard.com/donate" class="support-link">scamvanguard.com</a>
