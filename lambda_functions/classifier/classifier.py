@@ -2,13 +2,13 @@ import os
 import json
 import logging
 import boto3
-import urllib.request
-import urllib.error
+from openai import OpenAI
+from pydantic import BaseModel
 import re
 import tldextract
-from urllib.parse import urlparse
 from botocore.exceptions import ClientError
 from email.utils import parseaddr
+from typing import Literal
 
 # Set up logging
 log = logging.getLogger()
@@ -83,6 +83,12 @@ LEGITIMATE_EMAIL_PATTERNS = [
 ]
 
 no_cache_extract = tldextract.TLDExtract(cache_dir='/tmp')
+
+# Structured output schema
+class EmailClassification(BaseModel):
+    label: Literal["SAFE", "SCAM", "UNSURE"]  # Enum constraint
+    reason: str  # Brief explanation
+    detailed_reason: str  # Detailed analysis
 
 def is_email_suppressed(email):
     """
@@ -209,7 +215,7 @@ def get_openai_key():
         raise
 
 def classify(message):
-    """Classify text as SAFE, SCAM, or UNSURE using OpenAI GPT-4."""
+    """Classify text as SAFE, SCAM, or UNSURE using OpenAI GPT-5."""
     try:
         # Extract sender information
         sender = message.get("sender", "")
@@ -389,68 +395,57 @@ def classify(message):
         suspicious_items = [k.replace('_', ' ') for k, v in suspicious_indicators.items() if v][:5]  # cap at 5
 
         email_context = f"""
-Email Analysis:
-- Sender email: {sender}
-- Sender domain: {sender_domain}
-- Is public email domain: {is_public_domain}
-- Claims to be from company: {claims_to_be_company}
-- Number of URLs in email: {len(urls)}
-- Suspicious indicators found: {suspicious_count} ({', '.join(suspicious_items) if suspicious_items else 'none'})
+        Email Analysis:
+        - Sender email: {sender}
+        - Sender domain: {sender_domain}
+        - Is public email domain: {is_public_domain}
+        - Claims to be from company: {claims_to_be_company}
+        - Number of URLs in email: {len(urls)}
+        - Suspicious indicators found: {suspicious_count} ({', '.join(suspicious_items) if suspicious_items else 'none'})
 
-Email subject: {message.get('subject', 'No subject')}
+        Email subject: {message.get('subject', 'No subject')}
 
-Email content:
-{text[:4000]}
-"""
+        Email content:
+        {text[:4000]}
+        """
         
-        # Make API request
-        url = "https://api.openai.com/v1/chat/completions"
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json"
-        }
+        # Make API request using OpenAI Responses API
+        client = OpenAI(api_key=api_key)
         
-        data = {
-            "model": "gpt-4o-mini",
-            "response_format": {"type": "json_object"},
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": email_context}
-            ],
-            "temperature": 0.1,  # Very low for consistency
-            "max_tokens": 300
-        }
-        
-        req = urllib.request.Request(
-            url,
-            data=json.dumps(data).encode('utf-8'),
-            headers=headers
-        )
-        
-        with urllib.request.urlopen(req, timeout=20) as response:
-            result = json.loads(response.read().decode('utf-8'))
-        
-        # Extract and validate classification
-        content = result["choices"][0]["message"]["content"]
-        classification = json.loads(content)
-        
-        if "label" not in classification or classification["label"] not in ["SAFE", "SCAM", "UNSURE"]:
-            classification = {
+        try:
+            response = client.responses.parse(
+                model="gpt-5-mini",  # or gpt-5-nano for lower cost
+                modalities=["text"],
+                instructions=system_prompt,
+                input=[
+                    {"type": "message", "role": "user", "content": email_context}
+                ],
+                text_format=EmailClassification,
+                temperature=0.2, # Higher values like 0.8 will make the output more random, while lower values like 0.2 will make it more focused and deterministic.
+                #max_output_tokens=300
+            )
+
+            # Extract the parsed structured output
+            classification = response.output_parsed
+            
+            # Convert to dict format expected by rest of code
+            result = {
+                "label": classification.label,
+                "reason": classification.reason,
+                "detailed_reason": classification.detailed_reason
+            }
+            
+            log.info(f"AI Classification: {result['label']} for {sender_domain}")
+            return result
+            
+        except Exception as e:
+            log.error(f"OpenAI API error: {str(e)}")
+            return {
                 "label": "UNSURE",
-                "reason": "Unable to determine classification",
-                "detailed_reason": "The analysis could not definitively determine if this is safe or a scam. Exercise caution."
+                "reason": "Analysis service temporarily unavailable",
+                "detailed_reason": "Could not complete analysis. When in doubt, don't click links or share personal information."
             }
         
-        log.info(f"AI Classification: {classification['label']} for {sender_domain}")
-        return classification
-        
-    except urllib.error.URLError as e:
-        log.error(f"OpenAI API error: {str(e)}")
-        return {
-            "label": "UNSURE",
-            "reason": "Analysis service temporarily unavailable",
-            "detailed_reason": "Could not complete analysis. When in doubt, don't click links or share personal information."
-        }
     except Exception as e:
         log.error(f"Classification error: {str(e)}")
         return {
