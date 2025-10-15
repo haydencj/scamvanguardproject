@@ -141,18 +141,47 @@ resource "aws_ecr_lifecycle_policy" "lambda_functions" {
   repository = aws_ecr_repository.lambda_functions.name
 
   policy = jsonencode({
-    rules = [{
-      rulePriority = 1
-      description  = "Keep last 10 images per function"
-      selection = {
-        tagStatus     = "any"
-        countType     = "imageCountMoreThan"
-        countNumber   = 10
+    rules = [
+      {
+        rulePriority = 1
+        description  = "Keep last 4 versioned images per function"
+        selection = {
+          tagStatus     = "tagged"
+          tagPrefixList = ["classifier-", "email-parser-", "ses-feedback-processor-", "forward-contact-"]
+          countType     = "imageCountMoreThan"
+          countNumber   = 4
+        }
+        action = {
+          type = "expire"
+        }
+      },
+      {
+        rulePriority = 2
+        description  = "Keep -latest tags forever"
+        selection = {
+          tagStatus     = "tagged"
+          tagPrefixList = ["classifier-latest", "email-parser-latest", "ses-feedback-processor-latest", "forward-contact-latest"]
+          countType     = "imageCountMoreThan"
+          countNumber   = 999  # Effectively keep forever
+        }
+        action = {
+          type = "expire"
+        }
+      },
+      {
+        rulePriority = 3
+        description  = "Remove untagged images after 7 days"
+        selection = {
+          tagStatus   = "untagged"
+          countType   = "sinceImagePushed"
+          countUnit   = "days"
+          countNumber = 7
+        }
+        action = {
+          type = "expire"
+        }
       }
-      action = {
-        type = "expire"
-      }
-    }]
+    ]
   })
 }
 
