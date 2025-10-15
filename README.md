@@ -7,7 +7,7 @@ ScamVanguard is a free, serverless service that helps identify potential scams i
 ## Features
 
 - **Email Analysis**: Forward suspicious emails for instant AI-powered analysis
-- **AI-Powered Detection**: Uses OpenAI GPT-4 for intelligent scam detection
+- **AI-Powered Detection**: Uses OpenAI GPT-5 for intelligent scam detection
 - **Domain Legitimacy Checks**: Automatically identifies spoofed domains and public email abuse
 - **Simple Interface**: Easy-to-understand responses with clear verdicts
 - **Privacy-First**: No user data stored beyond 24 hours
@@ -50,7 +50,7 @@ ScamVanguard is built on AWS using a completely serverless, container-based arch
                            ↓
 7. Classifier performs domain legitimacy checks
                            ↓
-8. If needed, Classifier calls OpenAI GPT-4 for analysis
+8. If needed, Classifier calls OpenAI GPT-5 for analysis
                            ↓
 9. Classifier generates HTML/text response email
                            ↓
