@@ -342,6 +342,11 @@ def handler(event, context):
         response = s3.get_object(Bucket=BUCKET, Key=s3_key)
         raw_email = response["Body"].read()
         
+        log.info("=" * 60)
+        log.info("FULL RAW EMAIL FROM S3:")
+        log.info(raw_email.decode('utf-8', errors='ignore'))
+        log.info("=" * 60)
+
         # Parse email
         msg = BytesParser(policy=policy.default).parsebytes(raw_email)
         
